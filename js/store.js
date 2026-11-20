@@ -245,7 +245,7 @@ export const savePayee = (id, data, text) => write([{ type: 'setFields', col: 'l
 
 // ---- Import, backup ----
 /** Replace the whole budget with converted data (from a YNAB export or a backup). */
-export async function replaceAll(d, text) {
+export async function replaceAll(d, text, progress) {
   const ops = [];
   // Add the new budget.
   for (const a of d.accounts) ops.push({ type: 'set', col: 'accounts', id: a.id, data: compact(noId(a)) });
@@ -264,7 +264,12 @@ export async function replaceAll(d, text) {
   const cfg = { flags: d.flags?.length ? mergeFlags(d.flags) : flags(), importedAt: Date.now(), importedFrom: d.name || '' };
   ops.push({ type: 'set', col: 'config', id: 'main', data: clean(cfg), merge: true });
   housekept = false;
-  await write(ops, text);
+  // Sent in parts so progress can be shown, and so a failure is reported rather than swallowed.
+  ops.push({ type: 'set', col: 'audit', id: uid(), data: { at: Date.now(), by: me().name || '', text } });
+  const parts = []; let part = [], bytes = 0;
+  for (const o of ops) { const n = JSON.stringify(o).length; if (part.length >= 400 || bytes + n > 3e6) { parts.push(part); part = []; bytes = 0; } part.push(o); bytes += n; }
+  if (part.length) parts.push(part);
+  for (let i = 0; i < parts.length; i++) { await api.write(parts[i]); progress?.({ done: i + 1, total: parts.length }); }
   return ops.length;
 }
 const mergeFlags = fs => { const have = flags(); return [...have, ...fs.filter(f => !have.some(h => h.id === f.id))]; };

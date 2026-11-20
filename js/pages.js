@@ -32,9 +32,9 @@ export function viewSettings() {
   <section class="card">${D.flags().map((f, i) => `<div class="set-row"><i class="fdot" style="background:${esc(flagColour(f.color))};width:1rem;height:1rem"></i><input data-flag-name="${i}" value="${esc(f.name)}" style="flex:1"><select data-flag-color="${i}" style="width:7rem">${['red', 'orange', 'yellow', 'green', 'blue', 'purple'].map(c => `<option${c === f.color ? ' selected' : ''}>${c}</option>`).join('')}</select></div>`).join('')}<button class="btn ghost" data-add-flag>${icon('plus')} Add flag</button></section>
   <h2 class="sec">Data</h2>
   <section class="card stack">
-    <label class="btn ghost wide file">${icon('upload')} Import from YNAB<input type="file" accept=".json,application/json" id="imp-ynab" hidden></label>
+    <label class="btn ghost wide file">${icon('upload')} Import from YNAB<input type="file" id="imp-ynab" hidden></label>
     <button class="btn ghost wide" data-backup>${icon('download')} Download a backup</button>
-    <label class="btn ghost wide file">${icon('rotate-ccw')} Restore a backup<input type="file" accept=".json,application/json" id="imp-backup" hidden></label>
+    <label class="btn ghost wide file">${icon('rotate-ccw')} Restore a backup<input type="file" id="imp-backup" hidden></label>
     <button class="btn ghost wide" data-go="deleted">${icon('trash')} Recently deleted</button>
     <button class="btn ghost wide" data-go="activity">${icon('clock')} Activity</button>
     ${probs.length ? `<div class="banner">${icon('triangle-alert')}<span style="flex:1">Stored totals don't match for ${probs.map(esc).join(', ')}.</span><button class="btn ghost" data-repair>Recheck</button></div>` : `<p class="muted f-sub">${icon('circle-check')} Month records checked: totals match.</p>`}
@@ -90,9 +90,18 @@ export function checkImport(d, figures) {
   }
   return { budget: b, diffs, months: Object.keys(figures).length };
 }
+function problem(title, text, detail) {
+  openSheet(`<h2>${esc(title)}</h2><p>${esc(text)}</p>${detail ? `<div class="diffs">${esc(detail)}</div><p class="muted f-sub">Send a screenshot of this if you want help with it.</p>` : ''}<div class="row end"><button class="btn primary" data-close>OK</button></div>`);
+}
 async function importYnab(file) {
   let json, d;
-  try { json = JSON.parse(await file.text()); d = convertYnab(json); } catch (e) { return toast(e.message.includes('YNAB') ? e.message : 'That file could not be read as a YNAB export.'); }
+  const wait = openSheet(`<h2>Reading ${esc(file.name)}</h2><p class="muted">${(file.size / 1048576).toFixed(1)} MB. Checking it against YNAB's figures…</p>`);
+  await new Promise(r => setTimeout(r, 50));
+  try { json = JSON.parse(await file.text()); }
+  catch (e) { closeSheet(); return setTimeout(() => problem('That file isn\'t readable', `${file.name} isn't a JSON file, or it was cut short while downloading. The YNAB export should be about 7 MB.`, `${e.name}: ${e.message}`), 250); }
+  try { d = convertYnab(json); }
+  catch (e) { closeSheet(); return setTimeout(() => problem('That isn\'t a full YNAB export', 'Use the file saved from the YNAB API (GET /v1/plans/{id}), not the CSV export.', `${e.name}: ${e.message}`), 250); }
+  closeSheet(); await new Promise(r => setTimeout(r, 250));
   const fig = ynabFigures(json), chk = checkImport(d, fig), bal = E.accountBalances(d.accounts, d.txns);
   const p = json.data.plan || json.data.budget, acctDiffs = p.accounts.filter(a => !a.deleted && bal[a.id] && bal[a.id].working !== a.balance / 10).map(a => `${a.name}: ${E.fmt(bal[a.id].working)} here, ${E.fmt(a.balance / 10)} in YNAB`);
   const diffs = [...acctDiffs, ...chk.diffs];
@@ -103,9 +112,10 @@ async function importYnab(file) {
     <p class="muted f-sub">Importing replaces everything in this budget${D.isEmpty() ? '' : ', including changes made here since the last import'}. YNAB is not changed.</p>
     <div class="row end"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="imp-go">Import</button></div>`);
   $('#imp-go', b).onclick = async () => {
-    $('#imp-go', b).disabled = true; $('#imp-go', b).textContent = 'Importing…';
-    try { const n = await D.replaceAll(d, `Imported ${d.txns.length} transactions from YNAB (${d.name})`); closeSheet(); toast('Imported'); }
-    catch (e) { console.error(e); toast('The import didn\'t finish. Nothing should be half-saved; try again.'); }
+    const go = $('#imp-go', b); go.disabled = true; go.textContent = 'Importing…';
+    $('.row.end', b).insertAdjacentHTML('beforebegin', `<p class="muted f-sub" id="imp-prog">${D.backendKind() === 'local' ? 'Saving on this phone…' : 'Sending to Firebase. On a phone connection this can take a minute; keep the app open.'}</p>`);
+    try { await D.replaceAll(d, `Imported ${d.txns.length} transactions from YNAB (${d.name})`, n => { const pr = $('#imp-prog', b); if (pr) pr.textContent = `Saved ${n.done} of ${n.total} parts…`; }); closeSheet(); setTimeout(() => toast('Imported'), 250); }
+    catch (e) { console.error(e); closeSheet(); setTimeout(() => problem('The import didn\'t finish', e.code === 'permission-denied' ? 'Firebase refused it. Check the database rules list this Google account\'s email exactly, then try again.' : e.name === 'QuotaExceededError' ? 'This phone ran out of room for the local copy. Use the shared budget (Firebase) instead.' : 'Something stopped the import part-way. Importing again replaces everything, so it\'s safe to retry.', `${e.code || e.name || 'Error'}: ${e.message}`), 250); }
   };
 }
 async function restoreBackup(file) {
