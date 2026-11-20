@@ -6,7 +6,7 @@ This repo holds code only. Budget data lives in a private Firebase project, prot
 
 - **Set up:** see [SETUP.md](SETUP.md). Add `?local` to the address to try it on one phone without Firebase.
 - **Releases:** bump `VERSION` in `sw.js`. Phones show "An update is ready" and switch over when someone taps Reload.
-- **Tests:** `node tests/engine.test.mjs` (budget maths), `node tests/search.test.mjs` (search terms and dates), then `node tests/app.test.cjs` (needs Playwright and Chrome; runs two tabs on made-up data). Use `node tests/verify-ynab.mjs <export.json>` to check the maths against a real YNAB export kept outside the repo.
+- **Tests:** `node tests/engine.test.mjs` (budget maths), `node tests/search.test.mjs` (search terms and dates), `node tests/upsync.test.mjs` and `node tests/sync-job.test.mjs` (Up sync), then `node tests/app.test.cjs` (needs Playwright and Chrome; runs two tabs on made-up data). Use `node tests/verify-ynab.mjs <export.json>` to check the maths against a real YNAB export kept outside the repo.
 
 ## How it's organised
 
@@ -17,6 +17,8 @@ This repo holds code only. Budget data lives in a private Firebase project, prot
 | `js/search.js` | YNAB-style search terms and part-typed Australian dates. |
 | `js/store.js` | Live data and every change: transactions, transfers, splits, assigning, reconciling, the activity log, imports. |
 | `js/backend.js` | The only file that talks to Firebase. `backend-local.js` is the same thing kept in one browser. |
+| `js/upsync.js` | Turns Up records from the sync inbox into transactions: held and settled, matching, transfers, round-ups, who spent. |
+| `sync/` | The Up sync job for the private repository, and its setup steps. |
 | `js/setup.js` | Starting options (import, fresh start, categories only), fresh start later with archives, complete reset, accounts and categories. |
 | `js/views.js`, `sheets.js`, `pages.js`, `main.js` | Screens, slide-up sheets, settings, and wiring. |
 

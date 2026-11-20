@@ -40,7 +40,7 @@ export function viewHome() {
     return `<button class="card lcard" data-cat="${esc(id)}"><span class="txt"><b>${left >= 0 ? `${money(left)} left` : `${money(-left)} over`}</b><small>for ${esc(c.name.toLowerCase())}</small><span class="bar${left < 0 ? ' late' : ''}"><i style="width:${(100 - spentPct * 100).toFixed(0)}%"></i></span></span></button>`;
   }).join('');
   const personal = mine?.catId && D.category(mine.catId) ? `<button class="card lcard" data-cat="${esc(mine.catId)}"><span class="tile sm" style="--tile:#F4C7AB">${icon('wallet')}</span><span class="txt"><b>${money(D.catMonth(mine.catId, m).available)}</b><small>your spending money</small></span></button>` : '';
-  const waiting = D.unapproved().length;
+  const waiting = D.queue().length;
   return `${hero}
   <button class="btn primary wide big" data-afford>${icon('scale')} Can we afford this?</button>
   <h2 class="sec">This month</h2><div class="cards">${personal}${cards || '<p class="muted pad">Choose which categories show here in Settings.</p>'}</div>
@@ -77,10 +77,10 @@ export function viewBudget() {
 // ---- Accounts and registers ----
 const acctRow = (a, bal) => `<button class="acct" data-acct="${esc(a.id)}"><span class="tile sm" style="--tile:${a.type === 'credit' ? '#F4C7AB' : a.onBudget ? '#B9D6C8' : '#C7B8E0'}">${icon(a.type === 'credit' ? 'credit-card' : a.type === 'loan' ? 'landmark' : a.onBudget ? 'wallet' : 'piggy-bank')}</span><span class="txt"><b>${esc(a.name)}</b>${bal.uncleared ? `<small>${esc(E.fmt(bal.uncleared))} not yet cleared</small>` : ''}</span><span class="money">${esc(E.fmt(bal.working))}</span></button>`;
 export function viewAccounts() {
-  const bal = D.balances(), list = D.accountsSorted(), waiting = D.unapproved();
+  const bal = D.balances(), list = D.accountsSorted(), waiting = D.queue();
   const sect = (title, accts) => accts.length ? `<h2 class="sec">${title}<small>${esc(E.fmt(E.sum(accts, a => bal[a.id].working)))}</small></h2><div class="list">${accts.map(a => acctRow(a, bal[a.id])).join('')}</div>` : '';
   const closed = list.filter(a => a.closed);
-  return `${waiting.length ? `<section class="banner">${icon('inbox')}<span style="flex:1">${waiting.length} transaction${waiting.length > 1 ? 's' : ''} waiting for approval</span><button class="btn ghost" data-acct="__approve">Review</button></section>` : ''}
+  return `${upBanners()}${waiting.length ? `<section class="banner">${icon('inbox')}<span style="flex:1">${waiting.length} transaction${waiting.length > 1 ? 's' : ''} waiting for approval</span><button class="btn ghost" data-acct="__approve">Review</button></section>` : ''}
   ${D.openPlans().length ? `<button class="card lcard" data-bnpl style="margin-top:.5rem">${icon('receipt')}<span class="txt"><b>Buy now, pay later</b><small>${D.openPlans().length} plan${D.openPlans().length > 1 ? 's' : ''} still being paid off</small></span><span class="money">${esc(E.fmt(D.bnplOutstanding()))}</span></button>` : ''}
   <button class="card lcard" data-acct="__all" style="margin-top:.5rem">${icon('search')}<span class="txt"><b>All transactions</b><small>Search every account</small></span>${icon('chevron-right')}</button>
   ${sect('Budget accounts', list.filter(a => a.onBudget && !a.closed))}${sect('Tracking accounts', list.filter(a => !a.onBudget && !a.closed))}
@@ -137,7 +137,7 @@ export function registerList() {
 export function viewRegister() {
   const a = D.account(V.account), bal = a ? D.balances()[a.id] : null;
   const filt = V.filter?.categoryId ? `<div class="pills"><button class="pill on" data-clear-filter>${esc(D.categoryLabel(V.filter.categoryId))}${V.filter.month ? ', ' + esc(E.monthName(V.filter.month, false)) : ''} ${icon('x')}</button></div>` : '';
-  const head = a ? `<section class="card"><div class="kv"><span>Working balance</span><b>${money(bal.working)}</b><span>Cleared</span><b>${money(bal.cleared)}</b>${a.reconciledAt ? `<span>Last reconciled</span><b>${esc(new Date(a.reconciledAt).toLocaleDateString('en-AU'))}</b>` : ''}</div><div class="row"><button class="btn ghost" data-reconcile="${esc(a.id)}">${icon('check-check')} Reconcile</button><button class="btn ghost" data-edit-acct="${esc(a.id)}">${icon('pencil')} Account</button></div></section>`
+  const head = a ? `<section class="card"><div class="kv"><span>Working balance</span><b>${money(bal.working)}</b><span>Cleared</span><b>${money(bal.cleared)}</b>${upAccountFor(a.id) ? `<span>Up says</span><b>${money(upAccountFor(a.id).balance)}${upAccountFor(a.id).balance !== bal.working ? ` <small class="needs">(${esc(E.fmt(upAccountFor(a.id).balance - bal.working, { sign: true }))})</small>` : ''}</b>` : ''}${a.reconciledAt ? `<span>Last reconciled</span><b>${esc(new Date(a.reconciledAt).toLocaleDateString('en-AU'))}</b>` : ''}</div><div class="row"><button class="btn ghost" data-reconcile="${esc(a.id)}">${icon('check-check')} Reconcile</button><button class="btn ghost" data-edit-acct="${esc(a.id)}">${icon('pencil')} Account</button></div></section>`
     : V.account === '__approve' ? `<section class="card"><p>New transactions arrive with a suggested payee and category. They already count in balances.</p><button class="btn primary" data-approve-all>${icon('check-check')} Approve all</button></section>` : '';
   return `${head}${filt}<div class="search">${icon('search')}<input id="reg-q" type="search" placeholder="Search, e.g. payee:Foodland >50" value="${esc(V.search)}" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="x" data-save-search aria-label="Save this search">${icon('star')}</button><button class="x" data-search-help aria-label="Search terms">${icon('circle-help')}</button></div><div id="reg-extra">${registerExtras()}</div><div id="reg-list">${registerList()}</div>`;
 }
@@ -163,3 +163,16 @@ export function viewInsights() {
   <h2 class="sec">Income and spending</h2>
   <section class="card">${ie.map(x => `<div class="hb"><span>${esc(E.monthName(x.k, false))}</span><span style="display:grid;gap:3px"><i style="display:block;height:7px;border-radius:9px;background:var(--sage-d);width:${(x.i / ieMax * 100).toFixed(1)}%"></i><i style="display:block;height:7px;border-radius:9px;background:var(--coral);width:${(x.s / ieMax * 100).toFixed(1)}%"></i></span><b class="money" style="font-size:.78rem">${esc(E.fmt(x.i - x.s, { sign: true, cents: false }))}</b></div>`).join('')}<p class="muted" style="font-size:.78rem;margin-top:.4rem">Green: income. Coral: spending. Right: what was left.</p></section>`;
 }
+
+// ---- Up sync notices ----
+export const ago = ms => { const m = Math.round((Date.now() - ms) / 60e3); return m < 2 ? 'just now' : m < 90 ? `${m} minutes ago` : m < 36 * 60 ? `${Math.round(m / 60)} hours ago` : `${Math.round(m / 1440)} days ago`; };
+export function upBanners() {
+  const st = S.syncState, links = D.upLinks(), out = [];
+  if (!st) return '';
+  const fresh = (st.accounts || []).filter(a => !links[a.id]);
+  if (fresh.length && D.isApprover()) out.push(`<button class="banner" data-go="settings">${icon('landmark')}<span>${fresh.length === 1 ? `New Up account: ${esc(fresh[0].name)}.` : `${fresh.length} Up accounts aren't set up yet.`} Choose budget, track or ignore in Settings.</span></button>`);
+  if (Object.keys(links).length && st.lastOk && Date.now() - st.lastOk > 26 * 3600e3) out.push(`<button class="banner" data-go="settings">${icon('cloud-off')}<span>Up hasn't synced since ${esc(new Date(st.lastOk).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' }))}.${st.error ? ' ' + esc(st.error) : ''}</span></button>`);
+  if ((st.webhooks || []).length) out.push(`<button class="banner" data-go="settings">${icon('triangle-alert')}<span>Up has ${st.webhooks.length} webhook${st.webhooks.length > 1 ? 's' : ''} the app didn't create. Check Settings.</span></button>`);
+  return out.join('');
+}
+export const upAccountFor = accountId => { const id = Object.entries(D.upLinks()).find(([, l]) => l.accountId === accountId)?.[0]; return id ? (S.syncState?.accounts || []).find(a => a.id === id) || null : null; };

@@ -4,12 +4,36 @@ import * as D from './store.js';
 import { S } from './store.js';
 import { convertYnab, ynabFigures } from './ynab.js';
 import { $, $$, esc, icon, openSheet, closeSheet, toast, confirmBox, local, applyFontSize } from './ui.js';
-import { flagColour } from './views.js';
+import { flagColour, ago } from './views.js';
 import { pickCategory } from './sheets.js';
 
 const money = c => esc(E.fmt(c));
 const people = () => S.config.people || [];
 
+function upSection() {
+  const st = S.syncState, set = S.syncSettings || {}, links = D.upLinks(), every = set.everyHours || 6, people = (S.config.people || []).filter(x => x.email);
+  const status = !st ? 'The sync job hasn\'t run yet. Once it\'s set up in the private repository, the first run appears here within about an hour.'
+    : `${st.lastOk ? `Last synced ${ago(st.lastOk)}` : 'Not synced yet'}${st.lastRun && st.lastRun !== st.lastOk ? `; last checked ${ago(st.lastRun)}` : ''}.${st.error ? ` The last attempt failed: ${st.error}` : ''}${set.paused ? ' Paused.' : ''}`;
+  const acctOpts = (sel, upId) => D.accountsSorted().filter(a => !a.closed).map(a => { const taken = Object.entries(links).some(([u, l]) => u !== upId && l.accountId === a.id); return `<option value="${esc(a.id)}"${sel === a.id ? ' selected' : ''}${taken ? ' disabled' : ''}>Link to ${esc(a.name)}</option>`; }).join('');
+  const rows = (st?.accounts || []).map(u => { const l = links[u.id], acc = l && l.accountId !== 'ignore' ? D.account(l.accountId) : null;
+    const suggest = acc ? '' : D.accountsSorted().find(a => !a.closed && a.name.toLowerCase().replace(/[^a-z0-9]/g, '').includes(u.name.toLowerCase().replace(/^2up|[^a-z0-9]/g, '')))?.id;
+    const def = suggest && !l ? (D.account(suggest).reconciledAt ? E.addDays(D.account(suggest).reconciledAt.slice(0, 10), 1) : E.today()) : E.today();
+    return `<div class="card" style="padding:.7rem .8rem;margin:.5rem 0;box-shadow:none;background:var(--bg)"><div class="row"><b class="grow">${esc(u.name)}</b><span class="money">${esc(E.fmt(u.balance))}</span></div>
+      ${l ? `<small class="muted">${l.accountId === 'ignore' ? 'Ignored' : `${esc(acc?.name || '?')} · ${l.from ? `from ${esc(l.from.split('-').reverse().join('/'))}` : 'from when it was added'}`}</small> <button class="pill" data-unlink-up="${esc(u.id)}" style="min-height:30px">Change</button>`
+      : `<select data-up-choice="${esc(u.id)}" style="margin-top:.4rem"><option value="">Choose…</option>${acctOpts(suggest, u.id)}<option value="budget">Add as a new budget account</option><option value="track">Add as a tracking account</option><option value="ignore">Ignore it</option></select>
+         <label class="fld sub" data-up-from-wrap="${esc(u.id)}"${suggest ? '' : ' hidden'}><span>Bring in transactions from</span><input type="date" data-up-from="${esc(u.id)}" value="${def}"></label><p class="muted f-sub" style="margin:.2rem 0 0">Earlier transactions are already here from YNAB. Hand-entered ones after this date are matched, not doubled.</p>
+         <button class="btn primary" data-up-save="${esc(u.id)}" style="margin-top:.4rem">Save</button>`}</div>`; }).join('');
+  return `<h2 class="sec">Up sync</h2><section class="card">
+    <p class="f-sub" style="margin-top:0">${esc(status)}</p>
+    ${(st?.webhooks || []).length ? `<div class="banner">${icon('triangle-alert')}<span>Up has webhooks the app didn't create: ${st.webhooks.map(w => esc(w.host)).join(', ')}. If you didn't set these up, revoke the Up token in the Up app, make a new one for the GitHub secret, and delete the webhooks.</span></div>` : ''}
+    <div class="row in" style="margin-top:.6rem"><span class="grow" style="font-weight:400">Sync every</span><select data-sync-every style="width:8rem">${[1, 2, 3, 6, 12, 24].map(h => `<option value="${h}"${h === every ? ' selected' : ''}>${h} hour${h > 1 ? 's' : ''}</option>`).join('')}</select></div>
+    <div class="row" style="margin-top:.6rem"><button class="btn ghost" data-sync-now>${icon('refresh-cw')} Sync now</button><label class="mini"><input type="checkbox" data-sync-pause${set.paused ? ' checked' : ''}> Paused</label></div>
+    <p class="muted f-sub">Sync now is picked up within about an hour, when the job next wakes.</p>
+    ${rows ? `<div class="lbl" style="margin-top:.8rem">Joint Up accounts</div>${rows}` : ''}
+    ${people.length > 1 ? `<label class="fld"><span>Who approves new transactions</span><select data-approver>${people.map(x => `<option value="${esc(x.email)}"${(S.config.up?.approver || people[0].email) === x.email ? ' selected' : ''}>${esc(x.name || x.email)}</option>`).join('')}</select></label>` : ''}
+    ${(S.config.payeeRules || []).length ? `<div class="lbl" style="margin-top:.8rem">Renaming rules</div>${S.config.payeeRules.map((r, i) => `<div class="set-row"><span class="grow" style="font-weight:400">"${esc(r.match)}" → ${esc(D.payeeName(r.payeeId))}</span><button class="x" data-del-rule="${i}" aria-label="Remove">${icon('x')}</button></div>`).join('')}` : ''}
+  </section>`;
+}
 export function viewSettings() {
   const g = S.config.goal || {}, simple = S.config.simple?.catIds || [], probs = D.integrityProblems();
   const kind = D.backendKind();
@@ -30,6 +54,7 @@ export function viewSettings() {
     <button class="btn ghost" data-add-person>${icon('user-plus')} Add person</button><p class="muted f-sub">Each person's email must also be in the database rules (see SETUP.md).</p></section>
   <h2 class="sec">Flags</h2>
   <section class="card">${D.flags().map((f, i) => `<div class="set-row"><i class="fdot" style="background:${esc(flagColour(f.color))};width:1rem;height:1rem"></i><input data-flag-name="${i}" value="${esc(f.name)}" style="flex:1"><select data-flag-color="${i}" style="width:7rem">${['red', 'orange', 'yellow', 'green', 'blue', 'purple'].map(c => `<option${c === f.color ? ' selected' : ''}>${c}</option>`).join('')}</select></div>`).join('')}<button class="btn ghost" data-add-flag>${icon('plus')} Add flag</button></section>
+  ${upSection()}
   <h2 class="sec">Data</h2>
   <section class="card stack">
     <label class="btn ghost wide file">${icon('upload')} Import from YNAB<input type="file" id="imp-ynab" hidden></label>
@@ -61,6 +86,10 @@ export function wireSettings(view, render) {
     if (d.cfg) setCfgPath(d.cfg, x.value.trim());
     if (d.cfgMoney) setCfgPath(d.cfgMoney, Math.abs(E.parseMoney(x.value) || 0));
     if (d.local) local.set(d.local, x.checked);
+    if (d.syncEvery !== undefined) D.saveSyncSettings({ everyHours: +x.value }, `Up sync set to every ${x.value} hours`);
+    if (d.syncPause !== undefined) D.saveSyncSettings({ paused: x.checked, pausedBy: x.checked ? 'person' : null }, x.checked ? 'Paused the Up sync' : 'Resumed the Up sync');
+    if (d.approver !== undefined) D.setUp({ approver: x.value }, 'Changed who approves new transactions');
+    if (d.upChoice !== undefined) { const w = view.querySelector(`[data-up-from-wrap="${d.upChoice}"]`); if (w) w.hidden = ['', 'budget', 'track', 'ignore'].includes(x.value); }
     if (d.person !== undefined) { const ps = people().map(p => ({ ...p })); ps[+d.person][d.k] = x.value.trim(); D.patchConfig({ people: ps }, 'Edited people'); }
     if (d.flagName !== undefined || d.flagColor !== undefined) { const fs = D.flags().map(f => ({ ...f })), i = +(d.flagName ?? d.flagColor); if (d.flagName !== undefined) fs[i].name = x.value.trim() || fs[i].name; else fs[i].color = x.value; D.patchConfig({ flags: fs }, 'Edited flags'); }
     if (x.id === 'imp-ynab' && x.files[0]) importYnab(x.files[0]);
@@ -70,6 +99,10 @@ export function wireSettings(view, render) {
   view.oninput = e => { if (e.target.dataset.font !== undefined) { local.set('font', +e.target.value); applyFontSize(); } };
   view.onclick = e => {
     const x = e.target.closest('button'); if (!x) return; const d = x.dataset;
+    if (d.syncNow !== undefined) { D.syncNow(); return toast('Asked for a sync. It starts within about an hour.'); }
+    if (d.upSave) { const u = (S.syncState?.accounts || []).find(a => a.id === d.upSave), sel = view.querySelector(`[data-up-choice="${d.upSave}"]`).value; if (!sel) return toast('Choose what to do with it'); D.linkUp(u, sel, view.querySelector(`[data-up-from="${d.upSave}"]`)?.value || E.today()); return toast('Saved'); }
+    if (d.unlinkUp) { const links = { ...D.upLinks() }; delete links[d.unlinkUp]; return D.setUp({ links }, 'Changed an Up account link'); }
+    if (d.delRule !== undefined) return D.patchConfig({ payeeRules: (S.config.payeeRules || []).filter((_, i) => i !== +d.delRule) }, 'Removed a renaming rule');
     if (d.unpick) { setCfgPath(d.unpick, (getCfgPath(d.unpick) || []).filter(i => i !== d.id)); return; }
     if (d.pickCat) return pickCategory('Choose a category', id => { if (id) setCfgPath(d.pickCat, [...new Set([...(getCfgPath(d.pickCat) || []), id])]); });
     if (d.pickAcct) { const list = D.accountsSorted().filter(a => !a.closed); const b = openSheet(`<h2>Choose an account</h2><div class="pick">${list.map(a => `<button class="pick-row" data-a="${esc(a.id)}"><span>${esc(a.name)}</span></button>`).join('')}</div>`); b.onclick = ev => { const r = ev.target.closest('[data-a]'); if (r) { closeSheet(); setCfgPath(d.pickAcct, [...new Set([...(getCfgPath(d.pickAcct) || []), r.dataset.a])]); } }; return; }

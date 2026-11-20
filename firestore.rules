@@ -1,7 +1,9 @@
 rules_version = '2';
 // Only the two household Google accounts can read or change the budget.
-// Replace the two emails below before publishing these rules in the Firebase console (Firestore → Rules).
-// Keep the real emails out of this public repository.
+// The Up sync account (email sign-in, used only by the private GitHub job) can read the budget for the weekly
+// backup, and can write only the inbox of Up records and its own status. It can't change the budget itself.
+// Replace the two emails and the sync account's UID before publishing (Firestore → Rules).
+// Keep the real values out of this public repository.
 service cloud.firestore {
   match /databases/{database}/documents {
     function household() {
@@ -9,10 +11,19 @@ service cloud.firestore {
         && request.auth.token.email_verified == true
         && request.auth.token.email.lower() in ['first.person@gmail.com', 'second.person@gmail.com'];
     }
+    function syncAccount() {
+      return request.auth != null && request.auth.uid == 'SYNC_ACCOUNT_UID';
+    }
     match /households/budget/{document=**} {
       allow read, write: if household();
+      allow read: if syncAccount();
     }
-    // Everything else is closed.
+    match /households/budget/upInbox/{id} {
+      allow write: if syncAccount();
+    }
+    match /households/budget/sync/state {
+      allow write: if syncAccount();
+    }
     match /{document=**} {
       allow read, write: if false;
     }

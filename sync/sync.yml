@@ -1,0 +1,53 @@
+# Copy to .github/workflows/sync.yml in the PRIVATE sync repository.
+# Wakes hourly; the script decides whether a sync is due from the frequency set in the app.
+# No third-party actions: plain git and the Node that comes with the runner.
+name: Up sync
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Sync now, even if not due
+        type: boolean
+        default: true
+permissions:
+  contents: write
+concurrency:
+  group: up-sync
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Get the sync code
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -c http.extraheader="AUTHORIZATION: basic $auth" clone --depth 1 "https://github.com/${{ github.repository }}" repo
+      - name: Sync
+        working-directory: repo
+        env:
+          UP_TOKEN: ${{ secrets.UP_TOKEN }}
+          SYNC_EMAIL: ${{ secrets.SYNC_EMAIL }}
+          SYNC_PASSWORD: ${{ secrets.SYNC_PASSWORD }}
+          BACKUP_KEY: ${{ secrets.BACKUP_KEY }}
+          FIREBASE_API_KEY: AIzaSyBQ1Js3eHdjBiOAnlyBs4R7mgsdFeUJM2Y
+          FIREBASE_PROJECT: home-budget-8f244
+          FORCE: ${{ inputs.force || 'false' }}
+        run: node --version && node sync/up-sync.mjs
+      - name: Keep backups (the last 12) and record the run
+        if: always()
+        working-directory: repo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls backups/*.hbbak 2>/dev/null | sort | head -n -12 | xargs -r git rm -q
+          date -u +%Y-%m-%d > last-run.txt
+          git add -A backups last-run.txt
+          if git diff --cached --quiet; then exit 0; fi
+          git -c user.name=up-sync -c user.email=up-sync@users.noreply.github.com commit -q -m "Sync run $(date -u +%F)"
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -c http.extraheader="AUTHORIZATION: basic $auth" push -q origin HEAD

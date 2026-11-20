@@ -1,10 +1,10 @@
 // Keeps the app and the Firebase code on the phone so it opens with no signal.
 // Bump VERSION with each release. A new version waits until the app asks it to take over.
-const VERSION = 'v7';
+const VERSION = 'v9';
 const APP_CACHE = `home-budget-${VERSION}`;
 const SDK_CACHE = 'home-budget-sdk-12.18.0';
 const SDK = ['app', 'auth', 'firestore'].map(n => `https://www.gstatic.com/firebasejs/12.18.0/firebase-${n}.js`);
-const FILES = ['./', 'index.html', 'manifest.webmanifest', 'css/app.css', 'js/main.js', 'js/engine.js', 'js/ynab.js', 'js/search.js', 'js/setup.js', 'js/store.js', 'js/backend.js', 'js/backend-local.js', 'js/firebase-config.js', 'js/ui.js', 'js/views.js', 'js/sheets.js', 'js/pages.js', 'js/icons.js', 'fonts/poppins-400.woff', 'fonts/poppins-500.woff', 'fonts/poppins-700.woff', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-192.png', 'icons/maskable-512.png', 'icons/shortcut-add.png', 'icons/shortcut-afford.png'];
+const FILES = ['./', 'index.html', 'manifest.webmanifest', 'css/app.css', 'js/main.js', 'js/engine.js', 'js/ynab.js', 'js/search.js', 'js/setup.js', 'js/upsync.js', 'js/store.js', 'js/backend.js', 'js/backend-local.js', 'js/firebase-config.js', 'js/ui.js', 'js/views.js', 'js/sheets.js', 'js/pages.js', 'js/icons.js', 'fonts/poppins-400.woff', 'fonts/poppins-500.woff', 'fonts/poppins-700.woff', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-192.png', 'icons/maskable-512.png', 'icons/shortcut-add.png', 'icons/shortcut-afford.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil((async () => {

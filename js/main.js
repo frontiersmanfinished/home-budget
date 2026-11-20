@@ -36,7 +36,7 @@ export function render() {
   if (D.isEmpty() && !['settings', 'activity', 'deleted', 'archives', 'structure'].includes(V.view)) V.view = 'welcome';
   if (!D.isEmpty() && V.view === 'welcome') V.view = 'home';
   const view = $('#view'), active = document.activeElement, main = TABS.some(t => t[0] === V.view) || V.view === 'welcome';
-  const offline = !S.online || S.pending, waiting = D.unapproved().length;
+  const offline = !S.online || S.pending, waiting = D.queue().length;
   $('#top').innerHTML = `<div class="top-in"><div><div class="brand">${main ? icon('wallet') : `<button class="back" data-back aria-label="Back">${icon('chevron-left')}</button>`}<span>Home Budget</span>${D.backendKind() === 'local' ? '<span class="mode">This phone only</span>' : isTestEnv() ? '<span class="mode">Test</span>' : ''}${offline ? `<span class="sync">${icon('cloud-off')}<em>${S.online ? 'Syncing' : 'Offline'}</em></span>` : ''}</div><h1>${esc(V.view === 'welcome' ? 'Welcome' : title())}</h1>${goalBar()}</div><button class="menu" id="menu" aria-label="Menu">${icon('ellipsis-vertical')}</button></div>${WAVE}`;
   $$('#nav button').forEach(b => { const on = b.dataset.tab === V.view || (b.dataset.tab === 'accounts' && V.view === 'register'); b.classList.toggle('on', on); on ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current'); const bd = $('.badge', b); if (b.dataset.tab === 'accounts' && waiting) { if (!bd) b.insertAdjacentHTML('beforeend', `<span class="badge">${waiting}</span>`); else bd.textContent = waiting; } else bd?.remove(); });
   const selecting = V.selected.size > 0;

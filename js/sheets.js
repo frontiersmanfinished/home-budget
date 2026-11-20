@@ -4,7 +4,7 @@ import * as E from './engine.js';
 import * as D from './store.js';
 import { S } from './store.js';
 import { $, $$, esc, icon, openSheet, closeSheet, toast, confirmBox, pickFrom } from './ui.js';
-import { V, goal, flagColour } from './views.js';
+import { V, goal, flagColour, upAccountFor } from './views.js';
 import * as Q from './search.js';
 
 const money = c => esc(E.fmt(c));
@@ -51,7 +51,7 @@ export function openTxn(id, preset = {}) {
     <div id="t-date-show" class="datechips"></div>
     <label class="fld"><span>Memo</span><input id="t-memo" value="${esc(t.memo || '')}" placeholder="Optional note" autocomplete="off"></label>
     <div class="fld"><span class="lbl">Flags</span><div class="pills wrap" id="t-flags">${D.flags().map(f => `<button class="pill${(t.flags || []).includes(f.id) ? ' on' : ''}" data-flag="${esc(f.id)}"><i class="fdot" style="background:${esc(flagColour(f.color))}"></i>${esc(f.name)}</button>`).join('')}</div></div>
-    ${was ? `<p class="muted f-sub">${esc([was.createdBy && `Added by ${was.createdBy}`, was.updatedBy && was.updatedAt && `changed by ${was.updatedBy} ${new Date(was.updatedAt).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })}`, was.time && `bank time ${was.time}`, was.importPayee && `bank name: ${was.importPayee}`].filter(Boolean).join(', '))}</p>` : ''}
+    ${was ? `<p class="muted f-sub">${esc([was.createdBy && `Added by ${was.createdBy}`, was.updatedBy && was.updatedAt && `changed by ${was.updatedBy} ${new Date(was.updatedAt).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })}`, was.who && `spent by ${was.who}`, was.time && `bank time ${was.time}`, was.importPayee && `bank name: ${was.importPayee}`, was.upStatus === 'HELD' && 'held by Up, not settled yet', was.upStatus === 'GONE' && 'Up no longer shows this hold: it may have been released'].filter(Boolean).join(', '))}</p>` : ''}
     <div class="row end sticky">${was ? `<button class="btn danger" id="t-del">${icon('trash-2')} Delete</button><span class="grow"></span>` : ''}${was?.approved === false ? `<button class="btn ghost" id="t-approve">Approve</button>` : ''}<button class="btn primary" id="t-save">Save</button></div>`);
   const amt = $('#t-amt', b), payee = $('#t-payee', b), ac = $('#t-ac', b);
   const setDir = d => { inflow = d === 'in'; $$('#t-dir button', b).forEach(x => x.classList.toggle('on', x.dataset.dir === d)); drawCat(); };
@@ -228,10 +228,10 @@ export function openAfford() {
 
 // ---- Reconcile ----
 export function openReconcile(accountId) {
-  const a = D.account(accountId), bal = D.balances()[accountId];
+  const a = D.account(accountId), bal = D.balances()[accountId], upAcc = upAccountFor(accountId);
   const b = openSheet(`<h2>Reconcile ${esc(a.name)}</h2><p>Cleared balance here: <b>${money(bal.cleared)}</b></p><p class="muted">Does it match the bank? If not, enter the balance the bank shows${a.type === 'credit' ? ' (as a negative amount for money owed)' : ''}.</p>
     <div class="row end" style="margin-top:.4rem"><button class="btn primary" id="rc-yes">${icon('check')} Yes, it matches</button></div>
-    <label class="fld"><span>Bank's balance</span><input id="rc-bal" inputmode="decimal" placeholder="${esc((bal.cleared / 100).toFixed(2))}"></label>
+    <label class="fld"><span>Bank's balance</span><input id="rc-bal" inputmode="decimal" placeholder="${esc((bal.cleared / 100).toFixed(2))}" value="${upAcc && upAcc.balance !== bal.cleared ? (upAcc.balance / 100).toFixed(2) : ''}"></label>${upAcc ? `<p class="muted f-sub">Filled in from Up at the last sync (${esc(E.fmt(upAcc.balance))}). Up's balance includes held transactions, which aren't cleared yet.</p>` : ''}
     <div class="row end"><button class="btn ghost" id="rc-no">Use this balance</button></div>`);
   $('#rc-yes', b).onclick = () => { D.reconcile(accountId, bal.cleared); closeSheet(); toast('Reconciled and locked'); };
   $('#rc-no', b).onclick = () => {
@@ -253,8 +253,16 @@ export function bulk(kind, done) {
   const ids = [...V.selected];
   if (kind === 'category') return pickCategory(`Category for ${ids.length}`, id => { const undo = D.bulkEdit(ids, { categoryId: id }, `Set ${ids.length} transactions to ${D.categoryLabel(id)}`); done(); toast('Updated', { label: 'Undo', run: undo }); }, { rta: true });
   if (kind === 'payee') {
-    const b = openSheet(`<h2>Payee for ${ids.length} transactions</h2><label class="fld"><span>Payee</span><input id="bp-name" placeholder="Payee name" autocomplete="off"></label><p class="muted f-sub">Useful after an import, when one shop appears under many bank names.</p><div class="row end"><button class="btn primary" id="bp-save">Set payee</button></div>`);
-    $('#bp-save', b).onclick = () => { const n = $('#bp-name', b).value.trim(); if (!n) return; const pid = D.ensurePayee(n); const undo = D.bulkEdit(ids, { payeeId: pid }, `Set ${ids.length} transactions to ${n}`); closeSheet(); done(); toast('Updated', { label: 'Undo', run: undo }); };
+    const bank = ids.map(id => D.txn(id)?.importPayee || D.payeeName(D.txn(id)?.payeeId) || '').filter(Boolean);
+    const common = bank.length ? bank.reduce((a, c) => { let i = 0; while (i < a.length && i < c.length && a[i].toLowerCase() === c[i].toLowerCase()) i++; return a.slice(0, i); }).trim() : '';
+    const b = openSheet(`<h2>Payee for ${ids.length} transactions</h2><label class="fld"><span>Payee</span><input id="bp-name" placeholder="Payee name" autocomplete="off" value="${esc(common)}"></label><p class="muted f-sub">Useful after an import, when one shop appears under many bank names.</p>
+      <label class="sw-row"><span>Use it for future bank names too<small>Up names containing the text below get this payee</small></span><input type="checkbox" id="bp-rule"${common.length >= 4 ? ' checked' : ''}><i></i></label><input id="bp-match" value="${esc(common)}" placeholder="Text in the bank's name" autocomplete="off">
+      <div class="row end"><button class="btn primary" id="bp-save">Set payee</button></div>`);
+    $('#bp-save', b).onclick = () => {
+      const n = $('#bp-name', b).value.trim(); if (!n) return; const pid = D.ensurePayee(n); const undo = D.bulkEdit(ids, { payeeId: pid }, `Set ${ids.length} transactions to ${n}`);
+      const match = $('#bp-match', b).value.trim(); if ($('#bp-rule', b).checked && match.length >= 3) D.patchConfig({ payeeRules: [...(S.config.payeeRules || []).filter(r => r.match.toLowerCase() !== match.toLowerCase()), { match, payeeId: pid }] }, `Renaming rule: "${match}" → ${n}`);
+      closeSheet(); done(); toast('Updated', { label: 'Undo', run: undo });
+    };
     return;
   }
   if (kind === 'memo') {

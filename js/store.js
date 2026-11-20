@@ -2,6 +2,7 @@
 // Storage: completed months are one record each (all their transactions in a map keyed by id), so a new phone
 // loads about 80 records instead of 10,000+. The current and previous month stay as individual transactions.
 import * as E from './engine.js';
+import { planSync, slug } from './upsync.js';
 
 export const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2)).replace(/-/g, '').slice(0, 20);
 /** Drop empty fields so stored records stay small. */
@@ -15,7 +16,7 @@ export const DEFAULT_FLAGS = [{ id: 'f-reimburse', name: 'Reimburse', color: 'or
 // Each person in Settings → People gets a tax flag of their own.
 const taxFlags = () => (S.config.people || []).filter(p => p.name).map((p, i) => ({ id: `f-tax-${p.id}`, name: `Tax – ${p.name}`, color: ['blue', 'purple', 'green'][i % 3] }));
 export const S = {
-  phase: 'loading', user: null, config: {}, accounts: [], groups: [], categories: [], payees: {}, scheduled: [], assigned: {}, open: [], months: {}, audit: [], bnpl: [], archives: [], reset: null,
+  phase: 'loading', user: null, config: {}, accounts: [], groups: [], categories: [], payees: {}, scheduled: [], assigned: {}, open: [], months: {}, audit: [], bnpl: [], archives: [], reset: null, inbox: [], syncState: null, syncSettings: null,
   online: navigator.onLine, pending: false, synced: {}, error: null, v: 0,
 };
 let api, listeners = [], changed = () => {};
@@ -57,12 +58,15 @@ export const catMonth = (id, m) => budget().months[m]?.cats[id] || { assigned: 0
 export const categoryLabel = id => id === E.RTA ? 'Ready to Assign' : category(id)?.name || '';
 export const me = () => (S.config.people || []).find(p => p.email && p.email.toLowerCase() === (S.user?.email || '').toLowerCase()) || { id: S.user?.uid, name: (S.user?.displayName || S.user?.email || 'Me').split(/[\s@]/)[0], email: S.user?.email };
 /** A payee's usual category: the most common one across its last ten transactions. */
-export function usualCategory(pid) {
-  const recent = txns().filter(t => t.payeeId === pid && t.categoryId && t.categoryId !== E.RTA).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10);
+export function usualCategory(pid, amount = -1) {
+  const recent = txns().filter(t => t.payeeId === pid && t.categoryId && (amount > 0 ? t.amount > 0 : t.categoryId !== E.RTA)).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10);
   const n = new Map(); recent.forEach(t => n.set(t.categoryId, (n.get(t.categoryId) || 0) + 1));
   return [...n].sort((a, b) => b[1] - a[1])[0]?.[0] || S.payees[pid]?.categoryId || null;
 }
 export const unapproved = () => txns().filter(t => t.approved === false);
+/** Whose phone shows the approval queue (Settings → Up sync). Anyone, until it's chosen. */
+export const isApprover = () => { const a = S.config.up?.approver; return !a || a.toLowerCase() === (S.user?.email || '').toLowerCase(); };
+export const queue = () => (isApprover() ? unapproved() : []);
 const openFrom = () => E.addMonths(E.thisMonth(), -1);
 const storedIn = date => (E.monthOf(date) < openFrom() ? E.monthOf(date) : null);
 
@@ -73,7 +77,7 @@ export async function start(backend) {
   addEventListener('offline', () => { S.online = false; notify(); });
   api.onUser(u => {
     listeners.forEach(off => off()); listeners = [];
-    Object.assign(S, { user: u, config: {}, accounts: [], groups: [], categories: [], payees: {}, scheduled: [], assigned: {}, open: [], months: {}, audit: [], bnpl: [], archives: [], reset: null, synced: {} });
+    Object.assign(S, { user: u, config: {}, accounts: [], groups: [], categories: [], payees: {}, scheduled: [], assigned: {}, open: [], months: {}, audit: [], bnpl: [], archives: [], reset: null, inbox: [], syncState: null, syncSettings: null, synced: {} });
     S.phase = u ? 'loading' : 'signin';
     if (u) listenAll();
     notify();
@@ -97,6 +101,9 @@ function listenAll() {
   col('assigned', r => { S.assigned = Object.fromEntries(r.map(({ id, ...cats }) => [id, cats])); });
   col('months', r => { S.months = Object.fromEntries(r.map(x => [x.id, readMonth(x)])); });
   col('audit', r => { S.audit = r.sort((a, b) => b.at - a.at); });
+  col('upInbox', r => { S.inbox = r; scheduleUp(); });
+  listeners.push(api.listenDoc('sync', 'state', d => { S.syncState = d; scheduleUp(); notify(); }, denied));
+  listeners.push(api.listenDoc('sync', 'settings', d => { S.syncSettings = d; notify(); }, denied));
   col('archives', r => { S.archives = r.sort((a, b) => b.createdAt - a.createdAt); });
   listeners.push(api.listenDoc('meta', 'reset', d => { S.reset = d; notify(); }, denied));
   col('bnpl', r => { S.bnpl = r.sort((a, b) => (a.start || '').localeCompare(b.start || '')); });
@@ -189,7 +196,9 @@ export function saveTxn(input, { text } = {}) {
   const ops = [], undo = [];
   // The other side of a transfer.
   const pairWas = was?.transferId ? txn(was.transferId) : null;
-  if (t.transferAccountId && !t.splits) {
+  // A transfer whose other side was never brought in (it was before an account's start) stays one-sided when edited.
+  const oneSided = was && was.transferAccountId && !was.transferId && t.transferAccountId === was.transferAccountId;
+  if (t.transferAccountId && !t.splits && !oneSided) {
     const pid = pairWas?.id || t.transferId || uid();
     const pair = { ...(pairWas || {}), id: pid, date: t.date, amount: -t.amount, accountId: t.transferAccountId, transferAccountId: t.accountId, transferId: t.id, payeeId: transferPayee(t.accountId, ops), memo: t.memo, cleared: pairWas?.cleared || 'u', categoryId: needsCategory(t.transferAccountId, t.accountId) ? t.categoryId : null, updatedAt: now, updatedBy: who, createdAt: pairWas?.createdAt || now, createdBy: pairWas?.createdBy || who, source: pairWas?.source || 'manual' };
     t.transferId = pid; t.payeeId = transferPayee(t.transferAccountId, ops);
@@ -282,6 +291,7 @@ export async function replaceAll(d, text, progress) {
   const keep = new Set(ops.map(o => o.col + '/' + o.id)), gone = (col, id) => { if (!keep.has(col + '/' + id)) ops.unshift({ type: 'delete', col, id }); };
   S.accounts.forEach(a => gone('accounts', a.id)); S.groups.forEach(g => gone('groups', g.id)); S.categories.forEach(c => gone('categories', c.id)); S.scheduled.forEach(x => gone('scheduled', x.id));
   Object.keys(S.assigned).forEach(k => gone('assigned', k)); Object.keys(S.months).forEach(k => gone('months', k)); S.open.forEach(t => gone('txns', t.id));
+  if (S.syncSettings?.pausedBy === 'reset') ops.push({ type: 'set', col: 'sync', id: 'settings', data: { paused: false, pausedBy: null }, merge: true });
   const cfg = { flags: d.flags?.length ? mergeFlags(d.flags) : flags(), importedAt: Date.now(), importedFrom: d.name || '' };
   ops.push({ type: 'set', col: 'config', id: 'main', data: clean(cfg), merge: true });
   housekept = false;
@@ -331,8 +341,8 @@ export function plansFor(amount, providerText = '') {
   const prov = (providerText.match(BNPL_RE) || [''])[0].toLowerCase().replace(/\s/g, '');
   return openPlans().filter(p => Math.abs(nextAmount(p) - Math.abs(amount)) <= 1 && (!prov || p.provider.toLowerCase().replace(/\s/g, '').includes(prov.slice(0, 3))));
 }
-function autoInstalment(t) {
-  const name = payeeName(t.payeeId) || t.payeeText || t.importPayee || ''; if (!isBnplName(name) || t.amount >= 0) return null;
+function autoInstalment(t, nameIn) {
+  const name = nameIn || payeeName(t.payeeId) || t.payeeText || t.importPayee || ''; if (!isBnplName(name) || t.amount >= 0) return null;
   const ps = plansFor(t.amount, name); if (ps.length !== 1) return null;
   return { bnpl: { planId: ps[0].id, n: planPaid(ps[0]) + 1 }, categoryId: ps[0].categoryId };
 }
@@ -448,6 +458,7 @@ export async function fullBackup() {
 }
 /** Delete everything in the budget database. A record of who reset it, and when, is kept. */
 export async function completeReset() {
+  await api.write([{ type: 'set', col: 'sync', id: 'settings', data: { paused: true, pausedBy: 'reset' }, merge: true }]);
   const ops = [];
   for (const col of ALL_COLLECTIONS) for (const r of await api.getAll(col)) ops.push({ type: 'delete', col, id: r.id });
   const parts = []; for (let i = 0; i < ops.length; i += 300) parts.push(ops.slice(i, i + 300));
@@ -456,3 +467,52 @@ export async function completeReset() {
   monthCache.clear(); housekept = false;
   ['shut', 'lastAcct', 'cue.header', 'cue.afford'].forEach(k => localStorage.removeItem('hb.' + k));
 }
+
+// ---- Up sync: the app's half ----
+// The GitHub job writes Up records to the inbox; any signed-in phone turns them into transactions.
+// planSync gives the same answer on both phones, and ids are fixed, so nothing is ever doubled.
+let upTimer = null, upRunning = false;
+function scheduleUp() { clearTimeout(upTimer); upTimer = setTimeout(() => processUp().catch(e => console.error('Up sync', e)), 600); }
+export const upLinks = () => S.config.up?.links || {};
+export async function processUp() {
+  if (upRunning || S.phase !== 'app' || isEmpty() || !S.inbox.length || !Object.keys(upLinks()).length) return null;
+  upRunning = true;
+  try {
+    const ops = [], names = {};
+    const ctx = {
+      now: Date.now(),
+      payeeId: name => { const n = name.trim(); const found = Object.entries(S.payees).find(([, p]) => !p.transferAccountId && p.name.toLowerCase() === n.toLowerCase()); if (found) return found[0]; const id = 'pu-' + slug(n); if (!S.payees[id] && !names[id]) { names[id] = n; ops.push({ type: 'setFields', col: 'lists', id: 'payees', fields: [[[id], { name: n }]] }); } return id; },
+      transferPayee: accountId => transferPayee(accountId, ops),
+      usualCategory: (pid, amount) => (S.payees[pid] ? usualCategory(pid, amount) : null),
+      rename: desc => { const r = (S.config.payeeRules || []).find(x => x.match && desc.toLowerCase().includes(x.match.toLowerCase())); return r ? (S.payees[r.payeeId]?.name || null) : null; },
+      onBudget: id => !!account(id)?.onBudget,
+      whoFor: it => it.who || (S.config.up?.cards || {})[it.card] || null,
+      instalment: t => autoInstalment(t, names[t.payeeId] || payeeName(t.payeeId)),
+    };
+    const all = [...txns(), ...deletedTxns()].map(({ _m, ...t }) => t);
+    const plan = planSync({ items: S.inbox, txns: all, links: upLinks(), heldIds: S.syncState?.heldIds ?? null, ctx });
+    if (!plan.creates.length && !plan.updates.length) return plan;
+    const byId = new Map(all.map(t => [t.id, t]));
+    for (const t of plan.creates) ops.push(...placeOps(t, undefined));
+    for (const u of plan.updates) { const was = byId.get(u.id); if (was) ops.push(...placeOps({ ...was, ...u.fields })); }
+    await commit(ops, `Up sync: ${plan.creates.length} new, ${plan.updates.length} updated`);
+    return plan;
+  } finally { upRunning = false; }
+}
+export const saveSyncSettings = (data, text) => write([{ type: 'set', col: 'sync', id: 'settings', data: clean(data), merge: true }], text);
+export const syncNow = () => saveSyncSettings({ requestNow: Date.now(), paused: false }, 'Asked for an Up sync');
+/** Link an Up account: to an existing account, a new one (starting from Up's balance now), or ignore it. */
+export function linkUp(upAccount, choice, from) {
+  const links = { ...upLinks() }, now = Date.now(); let text;
+  if (choice === 'ignore') { links[upAccount.id] = { accountId: 'ignore' }; text = `Up: ignoring ${upAccount.name}`; }
+  else if (choice === 'budget' || choice === 'track') {
+    const type = upAccount.type === 'SAVER' ? 'savings' : upAccount.type === 'HOME_LOAN' ? 'loan' : 'checking', onBudget = choice === 'budget' && type !== 'loan';
+    const id = saveItem('accounts', null, { name: upAccount.name, type, onBudget, closed: false, order: S.accounts.length }, `Added ${upAccount.name} from Up`);
+    S.accounts.push({ id, name: upAccount.name, type, onBudget });
+    if (upAccount.balance) addWithPayee({ date: E.today(), amount: upAccount.balance, accountId: id, categoryId: onBudget ? E.RTA : null, cleared: 'c', memo: 'Opening balance from Up', source: 'start' }, 'Starting Balance');
+    links[upAccount.id] = { accountId: id, fromAt: now }; text = `Up: ${upAccount.name} added ${onBudget ? 'to the budget' : 'as tracking'}`;
+  } else { links[upAccount.id] = { accountId: choice, from }; text = `Up: ${upAccount.name} linked to ${account(choice)?.name} from ${from}`; }
+  setUp({ links }, text);
+}
+/** Replace the Up settings whole, so a removed link stays removed. */
+export const setUp = (fields, text) => setField('config', 'main', ['up'], clean({ ...(S.config.up || {}), ...fields }), text);
