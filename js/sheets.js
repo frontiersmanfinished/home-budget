@@ -269,7 +269,7 @@ export function bulk(kind, done) {
 
 // ---- Search help and saved searches ----
 export function searchHelp(use) {
-  const b = openSheet(`<h2>Search terms</h2><p class="muted f-sub">Tap an example to use it. Dates are day/month/year and can be typed in part: <code>19</code> or <code>19/10</code>.</p><div class="qhelp">${Q.OPERATORS.map(([op, ex, what]) => `<div class="qrow"><div><b>${esc(op)}</b> <span class="muted">${esc(what)}</span></div><div class="pills wrap" style="padding:0">${ex.split(' or ').map(x => `<button class="pill" data-ex="${esc(x)}" style="min-height:34px"><code>${esc(x)}</code></button>`).join('')}</div></div>`).join('')}</div>`);
+  const b = openSheet(`<h2>Search terms</h2><p class="muted f-sub">Tap an example to use it. Dates are day/month/year and can be typed in part: <code>19</code> or <code>19/10</code>.</p><div class="qhelp">${Q.OPERATORS.map(([op, ex, what]) => [op, ex.replace('who:Name', 'who:' + ((S.config.people || []).find(p => p.name && p.email !== S.user?.email)?.name || 'Name')), what]).map(([op, ex, what]) => `<div class="qrow"><div><b>${esc(op)}</b> <span class="muted">${esc(what)}</span></div><div class="pills wrap" style="padding:0">${ex.split(' or ').map(x => `<button class="pill" data-ex="${esc(x)}" style="min-height:34px"><code>${esc(x)}</code></button>`).join('')}</div></div>`).join('')}</div>`);
   b.onclick = e => { const x = e.target.closest('[data-ex]'); if (x) { closeSheet(); setTimeout(() => use(x.dataset.ex + ' '), 230); } };
 }
 export function saveSearch(q) {
