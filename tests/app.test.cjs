@@ -35,11 +35,11 @@ const file = path.join(os.tmpdir(), 'hb-sample-export.json'); fs.writeFileSync(f
 (async () => {
   const base = `http://localhost:${srv.address().port}/?local`;
   const browser = await chromium.launch({ executablePath: process.env.CHROME || '/usr/bin/google-chrome' });
-  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, deviceScaleFactor: 2, timezoneId: 'Australia/Adelaide', serviceWorkers: 'block' });
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, deviceScaleFactor: 2, timezoneId: 'Australia/Adelaide', serviceWorkers: 'block', acceptDownloads: true });
   const errs = [], watch = p => { p.on('pageerror', e => errs.push(e.message)); p.on('console', m => { if (m.type() === 'error') errs.push(m.text()); }); return p; };
   const a = watch(await ctx.newPage());
   await a.goto(base); await a.click('#signin'); await a.waitForSelector('.v-welcome');
-  await a.click('[data-go=settings]'); await a.setInputFiles('#imp-ynab', file); await a.waitForSelector('#imp-go'); await a.click('#imp-go'); await a.waitForTimeout(800);
+  const [fc0] = await Promise.all([a.waitForEvent('filechooser'), a.click('[data-start=import]')]); await fc0.setFiles(file); await a.waitForSelector('#imp-go'); await a.click('#imp-go'); await a.waitForTimeout(800);
   const rta = async p => { await p.click('[data-tab=budget]'); await p.waitForTimeout(150); return (await p.textContent('.rta .mid')).trim(); };
   const avail = async (p, cat) => { await rta(p); return (await p.textContent(`[data-cat="${cat}"] .pillv`)).trim(); };
   assert.equal(await rta(a), '$2,400.00'); assert.equal(await avail(a, C.groc), '$380.00'); assert.equal(await avail(a, C.cc), '$15.50');
@@ -101,6 +101,14 @@ const file = path.join(os.tmpdir(), 'hb-sample-export.json'); fs.writeFileSync(f
   await a.click('[data-acct=__all]'); await a.fill('#reg-q', 'is:bnpl'); await a.waitForTimeout(250);
   assert.deepEqual((await a.locator('#reg-list .tx b').allTextContents()).sort(), ['Anaconda (Afterpay 1 of 4)', 'Anaconda (Afterpay 2 of 4)']);
   await a.click('[data-tab=home]'); await a.screenshot({ path: SHOTS + '/home.png' });
+
+  // Complete reset (backup first, type RESET), then start again with basic categories.
+  await a.click('#menu'); await a.click('[data-m=settings]'); await a.click('[data-reset]'); assert.ok(await a.isDisabled('#rs-go'));
+  await a.fill('#rs-word', 'RESET'); const [dl] = await Promise.all([a.waitForEvent('download'), a.click('#rs-go')]); assert.ok(dl.suggestedFilename().startsWith('home-budget-before-reset'));
+  await a.waitForSelector('.v-welcome'); await b.waitForSelector('.v-welcome');
+  await a.click('[data-start=template]'); await a.click('[data-src=basic]'); await a.waitForTimeout(300);
+  await a.click('#af-add'); await a.fill('[data-i="0"][data-k="name"]', 'Everyday'); await a.click('#af-go'); await a.waitForTimeout(500);
+  assert.equal(await rta(a), '$0.00'); assert.equal(await a.locator('.cat').count(), 17);
   assert.deepEqual(errs, []);
   console.log('app tests passed');
   await browser.close(); srv.close();
