@@ -42,6 +42,7 @@ export function viewSettings() {
   <h2 class="sec">This phone</h2>
   <section class="card"><label class="fld" style="margin-top:0"><span>Text size</span><input type="range" min="90" max="130" step="5" data-font value="${local.get('font', 100)}"></label>
     <p class="muted f-sub">${kind === 'local' ? 'Running on this phone only: nothing is shared or backed up until Firebase is set up.' : `Signed in as ${esc(S.user?.email || '')}${new URLSearchParams(location.search).has('test') ? ' (test budget)' : ''}.`}</p>
+    ${kind === 'local' ? '<button class="btn primary wide" data-shared>Switch to our shared budget</button>' : ''}
     <button class="btn ghost wide" data-signout>${icon('log-out')} ${kind === 'local' ? 'Leave' : 'Sign out'}</button></section>`;
 }
 
@@ -72,6 +73,7 @@ export function wireSettings(view, render) {
     if (d.backup !== undefined) return download(`home-budget-backup-${E.today()}.json`, JSON.stringify(D.backupData()));
     if (d.repair !== undefined) { D.repairTotals(D.integrityProblems()); return toast('Rechecked'); }
     if (d.signout !== undefined) return D.signOut();
+    if (d.shared !== undefined) { localStorage.removeItem('hb.mode'); location.href = location.pathname; }
   };
 }
 export function download(name, text, type = 'application/json') {

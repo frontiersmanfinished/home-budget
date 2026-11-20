@@ -11,12 +11,12 @@ Keep it separate from Home Duties.
 
 ## 2. Turn on Google sign-in
 
-1. Go to **Build → Authentication → Get started → Sign-in method → Google**, turn it on and save.
+1. Go to **Authentication → Get started → Sign-in method → Google**, turn it on and save.
 2. Go to **Authentication → Settings → Authorised domains** and add `frontiersmanfinished.github.io`.
 
 ## 3. Create the database
 
-1. Go to **Build → Firestore Database → Create database**.
+1. Go to **Databases & Storage → Firestore → Create database**. Choose **Standard** edition and keep the ID `(default)`.
 2. Pick **australia-southeast1 (Sydney)** and start in **production mode**.
 3. Open the **Rules** tab. Paste in `firestore.rules`, put both Google emails where the placeholders are, and choose **Publish**. Don't commit the real emails to this repository.
 
