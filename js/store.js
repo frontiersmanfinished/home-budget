@@ -265,12 +265,23 @@ export async function replaceAll(d, text, progress) {
   ops.push({ type: 'set', col: 'config', id: 'main', data: clean(cfg), merge: true });
   housekept = false;
   // Sent in parts so progress can be shown, and so a failure is reported rather than swallowed.
-  ops.push({ type: 'set', col: 'audit', id: uid(), data: { at: Date.now(), by: me().name || '', text } });
-  const parts = []; let part = [], bytes = 0;
-  for (const o of ops) { const n = JSON.stringify(o).length; if (part.length >= 400 || bytes + n > 3e6) { parts.push(part); part = []; bytes = 0; } part.push(o); bytes += n; }
+  // Firebase limits each write by how many indexed values it changes (each completed month has thousands),
+  // so parts are sized by that count, not just by bytes.
+  const parts = []; let part = [], weight = 0, bytes = 0;
+  for (const o of ops) {
+    const w = opWeight(o), n = JSON.stringify(o).length;
+    if (part.length && (part.length >= 400 || weight + w > 8000 || bytes + n > 1.5e6)) { parts.push(part); part = []; weight = 0; bytes = 0; }
+    part.push(o); weight += w; bytes += n;
+  }
   if (part.length) parts.push(part);
   for (let i = 0; i < parts.length; i++) { await api.write(parts[i]); progress?.({ done: i + 1, total: parts.length }); }
   return ops.length;
+}
+/** Roughly how many indexed values a write changes: two per stored value, more for deleting a whole month. */
+export function opWeight(o) {
+  const leaves = x => (x && typeof x === 'object' ? (Array.isArray(x) ? 1 : Object.values(x).reduce((n, v) => n + leaves(v), 0)) : 1);
+  if (o.type === 'delete') return o.col === 'months' ? 6000 : o.col === 'lists' ? 5000 : 20;
+  return 2 * leaves(o.data ?? Object.fromEntries((o.fields || []).map(([p, v], i) => [i, v])));
 }
 const mergeFlags = fs => { const have = flags(); return [...have, ...fs.filter(f => !have.some(h => h.id === f.id))]; };
 export function backupData() {
