@@ -35,13 +35,20 @@ export function viewSettings() {
     <label class="btn ghost wide file">${icon('upload')} Import from YNAB<input type="file" id="imp-ynab" hidden></label>
     <button class="btn ghost wide" data-backup>${icon('download')} Download a backup</button>
     <label class="btn ghost wide file">${icon('rotate-ccw')} Restore a backup<input type="file" id="imp-backup" hidden></label>
+    <button class="btn ghost wide" data-go="structure">${icon('layout-grid')} Accounts and categories</button>
     <button class="btn ghost wide" data-go="deleted">${icon('trash')} Recently deleted</button>
+    <button class="btn ghost wide" data-go="archives">${icon('archive')} Archives${S.archives.length ? ` (${S.archives.length})` : ''}</button>
     <button class="btn ghost wide" data-go="activity">${icon('clock')} Activity</button>
     ${probs.length ? `<div class="banner">${icon('triangle-alert')}<span style="flex:1">Stored totals don't match for ${probs.map(esc).join(', ')}.</span><button class="btn ghost" data-repair>Recheck</button></div>` : `<p class="muted f-sub">${icon('circle-check')} Month records checked: totals match.</p>`}
   </section>
+  <h2 class="sec">Start again</h2>
+  <section class="card stack">
+    <button class="btn ghost wide" data-fresh>${icon('sprout')} Fresh start from today</button><p class="muted f-sub">Archives the budget as it is, so it stays searchable, then starts from today's balances.</p>
+    <button class="btn danger wide" data-reset>${icon('triangle-alert')} Complete reset</button><p class="muted f-sub">Deletes everything, with a backup saved first.</p>
+  </section>
   <h2 class="sec">This phone</h2>
   <section class="card"><label class="fld" style="margin-top:0"><span>Text size</span><input type="range" min="90" max="130" step="5" data-font value="${local.get('font', 100)}"></label>
-    <p class="muted f-sub">${kind === 'local' ? 'Running on this phone only: nothing is shared or backed up until Firebase is set up.' : `Signed in as ${esc(S.user?.email || '')}${new URLSearchParams(location.search).has('test') ? ' (test budget)' : ''}.`}</p>
+    <p class="muted f-sub">${kind === 'local' ? 'Running on this phone only. This copy is separate from our shared budget and isn\'t backed up.' : `Signed in as ${esc(S.user?.email || '')}${new URLSearchParams(location.search).has('test') ? ' (test budget)' : ''}.`}</p>
     ${kind === 'local' ? '<button class="btn primary wide" data-shared>Switch to our shared budget</button>' : ''}
     <button class="btn ghost wide" data-signout>${icon('log-out')} ${kind === 'local' ? 'Leave' : 'Sign out'}</button></section>`;
 }
@@ -70,6 +77,8 @@ export function wireSettings(view, render) {
     if (d.delPerson !== undefined) return D.patchConfig({ people: people().filter((_, i) => i !== +d.delPerson) });
     if (d.personCat !== undefined) return pickCategory('Their spending money', id => { const ps = people().map(p => ({ ...p })); ps[+d.personCat].catId = id; D.patchConfig({ people: ps }); });
     if (d.addFlag !== undefined) return D.patchConfig({ flags: [...D.flags(), { id: 'f-' + D.uid().slice(0, 8), name: 'New flag', color: 'green' }] });
+    if (d.fresh !== undefined) return import('./setup.js').then(m => m.freshStartLater());
+    if (d.reset !== undefined) return import('./setup.js').then(m => m.openReset());
     if (d.backup !== undefined) return download(`home-budget-backup-${E.today()}.json`, JSON.stringify(D.backupData()));
     if (d.repair !== undefined) { D.repairTotals(D.integrityProblems()); return toast('Rechecked'); }
     if (d.signout !== undefined) return D.signOut();
@@ -93,6 +102,7 @@ export function checkImport(d, figures) {
 function problem(title, text, detail) {
   openSheet(`<h2>${esc(title)}</h2><p>${esc(text)}</p>${detail ? `<div class="diffs">${esc(detail)}</div><p class="muted f-sub">Send a screenshot of this if you want help with it.</p>` : ''}<div class="row end"><button class="btn primary" data-close>OK</button></div>`);
 }
+export async function importYnabFile(file) { return importYnab(file); }
 async function importYnab(file) {
   let json, d;
   const wait = openSheet(`<h2>Reading ${esc(file.name)}</h2><p class="muted">${(file.size / 1048576).toFixed(1)} MB. Checking it against YNAB's figures…</p>`);

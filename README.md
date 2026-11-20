@@ -17,9 +17,10 @@ This repo holds code only. Budget data lives in a private Firebase project, prot
 | `js/search.js` | YNAB-style search terms and part-typed Australian dates. |
 | `js/store.js` | Live data and every change: transactions, transfers, splits, assigning, reconciling, the activity log, imports. |
 | `js/backend.js` | The only file that talks to Firebase. `backend-local.js` is the same thing kept in one browser. |
+| `js/setup.js` | Starting options (import, fresh start, categories only), fresh start later with archives, complete reset, accounts and categories. |
 | `js/views.js`, `sheets.js`, `pages.js`, `main.js` | Screens, slide-up sheets, settings, and wiring. |
 
-Completed months are stored as one record each. The current and previous month are stored as separate transactions, so a new phone loads about 80 records rather than 10,000 or more. Edits change only the field concerned, so two phones editing different transactions don't overwrite each other.
+Completed months are stored as one record each, holding their transactions as a single block of text: Firebase indexes every value in a map, and a month's worth exceeds what one write may change. The current and previous month are stored as separate transactions, so a new phone loads about 80 records rather than 10,000 or more. Edits change only the field concerned, so two phones editing different transactions don't overwrite each other.
 
 ## Matching YNAB
 

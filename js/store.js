@@ -15,7 +15,7 @@ export const DEFAULT_FLAGS = [{ id: 'f-reimburse', name: 'Reimburse', color: 'or
 // Each person in Settings → People gets a tax flag of their own.
 const taxFlags = () => (S.config.people || []).filter(p => p.name).map((p, i) => ({ id: `f-tax-${p.id}`, name: `Tax – ${p.name}`, color: ['blue', 'purple', 'green'][i % 3] }));
 export const S = {
-  phase: 'loading', user: null, config: {}, accounts: [], groups: [], categories: [], payees: {}, scheduled: [], assigned: {}, open: [], months: {}, audit: [], bnpl: [],
+  phase: 'loading', user: null, config: {}, accounts: [], groups: [], categories: [], payees: {}, scheduled: [], assigned: {}, open: [], months: {}, audit: [], bnpl: [], archives: [], reset: null,
   online: navigator.onLine, pending: false, synced: {}, error: null, v: 0,
 };
 let api, listeners = [], changed = () => {};
@@ -73,7 +73,7 @@ export async function start(backend) {
   addEventListener('offline', () => { S.online = false; notify(); });
   api.onUser(u => {
     listeners.forEach(off => off()); listeners = [];
-    Object.assign(S, { user: u, config: {}, accounts: [], groups: [], categories: [], payees: {}, scheduled: [], assigned: {}, open: [], months: {}, audit: [], bnpl: [], synced: {} });
+    Object.assign(S, { user: u, config: {}, accounts: [], groups: [], categories: [], payees: {}, scheduled: [], assigned: {}, open: [], months: {}, audit: [], bnpl: [], archives: [], reset: null, synced: {} });
     S.phase = u ? 'loading' : 'signin';
     if (u) listenAll();
     notify();
@@ -95,8 +95,10 @@ function listenAll() {
   col('accounts', r => { S.accounts = r; }); col('groups', r => { S.groups = r; }); col('categories', r => { S.categories = r; });
   col('scheduled', r => { S.scheduled = r; }); col('txns', r => { S.open = r; });
   col('assigned', r => { S.assigned = Object.fromEntries(r.map(({ id, ...cats }) => [id, cats])); });
-  col('months', r => { S.months = Object.fromEntries(r.map(x => [x.id, x])); });
+  col('months', r => { S.months = Object.fromEntries(r.map(x => [x.id, readMonth(x)])); });
   col('audit', r => { S.audit = r.sort((a, b) => b.at - a.at); });
+  col('archives', r => { S.archives = r.sort((a, b) => b.createdAt - a.createdAt); });
+  listeners.push(api.listenDoc('meta', 'reset', d => { S.reset = d; notify(); }, denied));
   col('bnpl', r => { S.bnpl = r.sort((a, b) => (a.start || '').localeCompare(b.start || '')); });
   listeners.push(api.listenDoc('lists', 'payees', (d, m) => { S.payees = d || {}; seen('lists', m); }, denied));
   listeners.push(api.listenDoc('config', 'main', (d, m) => { S.config = d || {}; seen('config', m); }, denied));
@@ -137,12 +139,30 @@ function placeOps(t, from = locate(t.id)) {
   return ops;
 }
 const removeOps = (id, from) => (from ? [{ type: 'unsetFields', col: 'months', id: from, paths: [['txns', id]] }] : [{ type: 'delete', col: 'txns', id }]);
-/** Keep each month record's count and total current, for the integrity check. */
+// A completed month is stored as one block of text (JSON of its transactions), with its count and total.
+// Firebase indexes every value in a map, and a month holds thousands, which is more than one write may change;
+// text is indexed once. The app never searches inside it on the server, so nothing is lost.
+const monthCache = new Map();
+function readMonth(x) {
+  if (x.json === undefined) return x; // older format: a map of transactions
+  const c = monthCache.get(x.id); if (c && c.json === x.json) return { ...x, txns: c.txns };
+  let txns = {}; try { txns = JSON.parse(x.json); } catch (e) { console.error('Month record unreadable', x.id, e); }
+  monthCache.set(x.id, { json: x.json, txns }); return { ...x, txns };
+}
+export const monthDoc = map => { const list = Object.values(map).filter(E.live); return { v: 2, json: JSON.stringify(map), count: list.length, total: E.sum(list, t => t.amount) }; };
+/** Turn per-transaction month changes into one rewrite of each month touched, with its count and total. */
 function withTotals(ops) {
   const touched = new Set(ops.filter(o => o.col === 'months').map(o => o.id)); if (!touched.size) return ops;
   const after = {}; for (const k of touched) after[k] = { ...(S.months[k]?.txns || {}) };
   for (const o of ops) if (o.col === 'months') { (o.fields || []).forEach(([p, v]) => { if (p[0] === 'txns') after[o.id][p[1]] = v; }); (o.paths || []).forEach(p => { if (p[0] === 'txns') delete after[o.id][p[1]]; }); }
-  return [...ops, ...[...touched].map(k => { const list = Object.values(after[k]).filter(E.live); return { type: 'set', col: 'months', id: k, data: { count: list.length, total: E.sum(list, t => t.amount) }, merge: true }; })];
+  const out = ops.filter(o => o.col !== 'months');
+  for (const k of touched) {
+    if (!Object.keys(after[k]).length) { out.push({ type: 'delete', col: 'months', id: k }); delete S.months[k]; continue; }
+    out.push({ type: 'set', col: 'months', id: k, data: monthDoc(after[k]) });
+    S.months[k] = { ...(S.months[k] || {}), txns: after[k] }; // so a change made straight after this one builds on it
+  }
+  S.v++;
+  return out;
 }
 const commit = (ops, text) => write(withTotals(ops), text);
 
@@ -240,6 +260,7 @@ export function moveMoney(from, to, m, cents) {
   return setManyAssigned(m, { [from]: (a[from] || 0) - cents, [to]: (a[to] || 0) + cents }, `Moved ${E.fmt(cents)} from ${category(from)?.name} to ${category(to)?.name}`);
 }
 export const saveItem = (col, id, data, text) => { const key = id || uid(); write([{ type: 'set', col, id: key, data: clean(data), merge: true }], text); return key; };
+export const removeItem = (col, id, text) => write([{ type: 'delete', col, id }], text);
 export const patchConfig = (data, text) => write([{ type: 'set', col: 'config', id: 'main', data: clean(data), merge: true }], text);
 export const savePayee = (id, data, text) => write([{ type: 'setFields', col: 'lists', id: 'payees', fields: Object.entries(data).map(([k, v]) => [[id, k], v]) }], text);
 
@@ -256,7 +277,7 @@ export async function replaceAll(d, text, progress) {
   ops.push({ type: 'set', col: 'lists', id: 'payees', data: Object.fromEntries(d.payees.map(p => [p.id, compact(noId(p))])) });
   const recs = {};
   for (const t of d.txns) { const m = storedIn(t.date); if (m) ((recs[m] ??= {})[t.id] = txnData(t)); else ops.push({ type: 'set', col: 'txns', id: t.id, data: txnData(t) }); }
-  for (const [m, map] of Object.entries(recs)) { const list = Object.values(map); ops.push({ type: 'set', col: 'months', id: m, data: { txns: map, count: list.length, total: E.sum(list, t => t.amount) } }); }
+  for (const [m, map] of Object.entries(recs)) ops.push({ type: 'set', col: 'months', id: m, data: monthDoc(map) });
   // Clear what's there now and isn't replaced (sets below overwrite the rest whole).
   const keep = new Set(ops.map(o => o.col + '/' + o.id)), gone = (col, id) => { if (!keep.has(col + '/' + id)) ops.unshift({ type: 'delete', col, id }); };
   S.accounts.forEach(a => gone('accounts', a.id)); S.groups.forEach(g => gone('groups', g.id)); S.categories.forEach(c => gone('categories', c.id)); S.scheduled.forEach(x => gone('scheduled', x.id));
@@ -299,8 +320,8 @@ export const BNPL_RE = /afterpay|zip ?pay|zip ?money|klarna|humm|latitude ?pay|p
 export const isBnplName = s => BNPL_RE.test(s || '');
 export const plan = id => S.bnpl.find(p => p.id === id);
 export const instalments = id => txns().filter(t => t.bnpl?.planId === id).sort((a, b) => a.bnpl.n - b.bnpl.n);
-export const planPaid = p => instalments(p.id).length;
-export const planLeft = p => Math.max(0, p.total - E.sum(instalments(p.id), t => -t.amount));
+export const planPaid = p => (p.paidBefore || 0) + instalments(p.id).length;
+export const planLeft = p => Math.max(0, p.total - (p.paidAmountBefore || 0) - E.sum(instalments(p.id), t => -t.amount));
 export const openPlans = () => S.bnpl.filter(p => !p.closedAt && planPaid(p) < p.count);
 export const bnplOutstanding = () => E.sum(openPlans(), planLeft);
 export function bnplLabel(t) { const p = t?.bnpl && plan(t.bnpl.planId); return p ? `${p.shop} (${p.provider} ${t.bnpl.n} of ${p.count})` : ''; }
@@ -323,3 +344,115 @@ export function startPlan({ provider, shop, total, count, categoryId, accountId,
   return id;
 }
 export const closePlan = id => write([{ type: 'update', col: 'bnpl', id, data: { closedAt: Date.now() } }], `Closed the ${plan(id)?.shop} plan`);
+
+// ---- Starting a budget: fresh start, template, archives, complete reset ----
+/** Household categories without amounts, for starting without a YNAB file. */
+export const BASIC_TEMPLATE = (() => {
+  const g = (id, name, order, cats) => ({ group: { id, name, order }, cats: cats.map((n, i) => ({ id: `${id}-${i}`, groupId: id, name: n, order: i })) });
+  const parts = [g('g-needs', 'Needs', 0, ['Mortgage or rent', 'Groceries & Household', 'Utilities & Rates', 'Medical', 'Transport', 'Insurance', 'School', 'Pets', 'Work', 'Interest & Fees']),
+    g('g-wants', 'Wants', 1, ['Food', 'Lifestyle & Fun', 'Gifts, Giving & Celebrations', 'Kids Extras', 'Holidays & Getaways']),
+    g('g-savings', 'Savings', 2, ["Next Month's Budget", 'Investments'])];
+  return { groups: parts.map(p => p.group), categories: parts.flatMap(p => p.cats) };
+})();
+export const ACCOUNT_KINDS = { checking: 'Everyday', savings: 'Savings', cash: 'Cash', credit: 'Credit card', loan: 'Loan or mortgage', asset: 'Tracking (investments, kids\' savings)' };
+/**
+ * Build a new budget from a structure (groups, categories with targets, accounts) and opening balances.
+ * accounts: [{ id, name, type, onBudget, balance }]. Balances of 0 add no opening transaction.
+ */
+export function newBudget({ groups, categories, accounts, payees = [], scheduled = [], date = E.today(), withBalances = true, name }) {
+  const accs = accounts.map((a, i) => ({ id: a.id || uid(), name: a.name, type: a.type, onBudget: !!a.onBudget, closed: false, order: i }));
+  let cats = categories.map(c => ({ ...c }));
+  let grps = groups.map(g => ({ ...g }));
+  // Every on-budget card gets a payment category.
+  let cc = grps.find(g => g.kind === 'cc'); if (!cc && accs.some(a => a.type === 'credit' && a.onBudget)) { cc = { id: 'g-cc', name: 'Credit Card Payments', order: -1, kind: 'cc' }; grps.unshift(cc); }
+  for (const a of accs.filter(a => a.type === 'credit' && a.onBudget)) {
+    const have = cats.find(c => c.kind === 'cc' && (c.accountId === a.id || c.name === a.name));
+    if (have) Object.assign(have, { accountId: a.id, name: a.name, hidden: false }); else cats.push({ id: 'cc-' + a.id.slice(0, 16), groupId: cc.id, name: a.name, kind: 'cc', accountId: a.id, order: 0 });
+  }
+  cats = cats.filter(c => c.kind !== 'cc' || accs.some(a => a.id === c.accountId));
+  const startPayee = { id: 'p-starting-balance', name: 'Starting Balance' };
+  const txns = withBalances ? accounts.map((a, i) => ({ a, acc: accs[i] })).filter(x => x.a.balance).map(({ a, acc }) => ({
+    id: uid(), date, amount: a.balance, accountId: acc.id, payeeId: startPayee.id, cleared: 'c', approved: true, source: 'start', memo: 'Opening balance',
+    categoryId: acc.onBudget && acc.type !== 'credit' ? E.RTA : null,
+  })) : [];
+  return { name, accounts: accs, groups: grps, categories: cats, assigned: {}, txns, payees: [...payees.filter(p => !p.transferAccountId && p.id !== startPayee.id), startPayee], scheduled, flags: [] };
+}
+/** The current budget's structure, for a fresh start later. */
+export function currentStructure() {
+  const bal = balances();
+  return {
+    groups: S.groups.map(g => ({ ...g })), categories: S.categories.map(c => ({ ...c })),
+    accounts: accountsSorted().filter(a => !a.closed).map(a => ({ id: a.id, name: a.name, type: a.type, onBudget: a.onBudget, balance: bal[a.id]?.working || 0 })),
+    payees: Object.entries(S.payees).map(([id, p]) => ({ ...p, id })), scheduled: S.scheduled.map(x => ({ ...x })),
+  };
+}
+const ARCHIVE_PART = 1500;
+// Archives are compressed: transaction lists are mostly repeated text and shrink to about a sixth.
+async function pack(obj) {
+  const text = JSON.stringify(obj); if (typeof CompressionStream === 'undefined') return { json: text };
+  const buf = new Uint8Array(await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
+  let bin = ''; for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+  return { gz: btoa(bin) };
+}
+async function unpack(d) {
+  if (d.json !== undefined) return JSON.parse(d.json);
+  const bytes = Uint8Array.from(atob(d.gz), c => c.charCodeAt(0));
+  return JSON.parse(await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text());
+}
+/** Keep the whole budget as it is now, read-only: searchable and exportable later. */
+export async function archiveCurrent(name) {
+  const id = 'a' + Date.now().toString(36), all = [...txns(), ...deletedTxns()].map(({ _m, ...t }) => t).sort((a, b) => a.date.localeCompare(b.date));
+  const parts = []; for (let i = 0; i < all.length; i += ARCHIVE_PART) parts.push(all.slice(i, i + ARCHIVE_PART));
+  const ctx = { accounts: S.accounts, groups: S.groups, categories: S.categories, payees: S.payees, assigned: S.assigned, flags: flags() };
+  const meta = { name, createdAt: Date.now(), by: me().name || '', from: all[0]?.date || null, to: all.at(-1)?.date || null, count: all.length, parts: parts.length, ...(await pack(ctx)) };
+  let written = 0;
+  try {
+    for (let i = 0; i < parts.length; i++) { await api.write([{ type: 'set', col: 'archiveParts', id: `${id}-${i}`, data: { archiveId: id, i, ...(await pack(parts[i])) } }]); written++; }
+    await api.write([{ type: 'set', col: 'archives', id, data: meta }]);
+  } catch (e) {
+    // Leave nothing half-saved; the budget itself hasn't been touched yet.
+    await api.write(Array.from({ length: written }, (_, i) => ({ type: 'delete', col: 'archiveParts', id: `${id}-${i}` }))).catch(() => {});
+    if (e.name === 'QuotaExceededError') throw new Error('This phone-only copy has no room for an archive. Use the shared budget instead.');
+    throw e;
+  }
+  return id;
+}
+/** Load an archive's transactions and names. */
+export async function loadArchive(id) {
+  const meta = S.archives.find(a => a.id === id) || await api.getDoc('archives', id); if (!meta) throw new Error('Archive not found');
+  const parts = await Promise.all(Array.from({ length: meta.parts }, (_, i) => api.getDoc('archiveParts', `${id}-${i}`)));
+  return { meta, ctx: await unpack(meta), txns: (await Promise.all(parts.filter(Boolean).map(unpack))).flat() };
+}
+export async function deleteArchive(id) {
+  const meta = S.archives.find(a => a.id === id); const ops = [{ type: 'delete', col: 'archives', id }];
+  for (let i = 0; i < (meta?.parts || 0); i++) ops.push({ type: 'delete', col: 'archiveParts', id: `${id}-${i}` });
+  await api.write(ops); await write([], `Deleted the archive ${meta?.name || ''}`);
+}
+/** Archive what's here, then start again from today's balances, keeping categories, targets, payees and settings. */
+export async function freshStart({ accounts, keepScheduled = true, archiveName }) {
+  const st = currentStructure();
+  await archiveCurrent(archiveName || `Budget to ${E.today().split('-').reverse().join('/')}`);
+  const d = newBudget({ ...st, accounts, scheduled: keepScheduled ? st.scheduled : [] });
+  // Plans still being paid off carry their count across; finished ones go with the archive.
+  const keep = openPlans().map(p => ({ id: p.id, paidBefore: planPaid(p), paidAmountBefore: p.total - planLeft(p) }));
+  await replaceAll(d, `Fresh start: archived the budget and started again from today's balances`);
+  const ops = S.bnpl.map(p => { const k = keep.find(x => x.id === p.id); return k ? { type: 'update', col: 'bnpl', id: p.id, data: { paidBefore: k.paidBefore, paidAmountBefore: k.paidAmountBefore } } : { type: 'delete', col: 'bnpl', id: p.id }; });
+  if (ops.length) await api.write(ops);
+}
+export const ALL_COLLECTIONS = ['accounts', 'groups', 'categories', 'scheduled', 'assigned', 'txns', 'months', 'audit', 'bnpl', 'archives', 'archiveParts', 'lists', 'config'];
+/** A full backup including archives, for saving before a reset. */
+export async function fullBackup() {
+  const b = backupData(); b.data.archives = [];
+  for (const a of S.archives) { const x = await loadArchive(a.id); const { json, gz, ...meta } = a; b.data.archives.push({ meta, ctx: x.ctx, txns: x.txns }); }
+  b.data.bnpl = S.bnpl; b.data.audit = S.audit; return b;
+}
+/** Delete everything in the budget database. A record of who reset it, and when, is kept. */
+export async function completeReset() {
+  const ops = [];
+  for (const col of ALL_COLLECTIONS) for (const r of await api.getAll(col)) ops.push({ type: 'delete', col, id: r.id });
+  const parts = []; for (let i = 0; i < ops.length; i += 300) parts.push(ops.slice(i, i + 300));
+  for (const p of parts) await api.write(p);
+  await api.write([{ type: 'set', col: 'meta', id: 'reset', data: { at: Date.now(), by: me().name || S.user?.email || '', email: S.user?.email || '', syncPaused: true } }]);
+  monthCache.clear(); housekept = false;
+  ['shut', 'lastAcct', 'cue.header', 'cue.afford'].forEach(k => localStorage.removeItem('hb.' + k));
+}

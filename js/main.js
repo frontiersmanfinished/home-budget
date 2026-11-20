@@ -7,7 +7,8 @@ import { $, $$, esc, icon, toast, applyFontSize, sheetOpen, closeSheet, openShee
 import { V, viewHome, viewBudget, viewAccounts, viewRegister, registerList, registerExtras, registerRows, viewInsights, goalBar } from './views.js';
 import * as Q from './search.js';
 import { openTxn, openCategory, openAfford, openReconcile, editAccount, bulk, openPlans, searchHelp, saveSearch } from './sheets.js';
-import { viewSettings, wireSettings, viewDeleted, viewActivity } from './pages.js';
+import { viewSettings, wireSettings, viewDeleted, viewActivity, importYnabFile } from './pages.js';
+import { viewWelcome, startFlow, viewArchives, openArchive, viewStructure, newAccount, editGroup, editCategory } from './setup.js';
 
 const root = $('#root');
 const TABS = [['home', 'Home', 'house'], ['budget', 'Budget', 'wallet'], ['accounts', 'Accounts', 'landmark'], ['insights', 'Insights', 'trending-up']];
@@ -23,8 +24,8 @@ function drawShell() {
   shell = true;
   root.innerHTML = `<header class="top" id="top"></header><main id="view"></main><button class="fab" id="fab" aria-label="Add transaction">${icon('plus')}</button><nav class="nav" id="nav" aria-label="Main">${TABS.map(([v, l, i]) => `<button data-tab="${v}">${icon(i)}<span>${l}</span></button>`).join('')}</nav><div class="selbar" id="selbar"></div>`;
 }
-const title = () => ({ home: D.me().name && D.backendKind() !== 'local' ? `Hello ${D.me().name}` : 'Home', budget: 'Budget', accounts: 'Accounts', insights: 'Insights', settings: 'Settings', deleted: 'Recently deleted', activity: 'Activity', register: V.account === '__all' ? 'All transactions' : V.account === '__approve' ? 'To approve' : D.account(V.account)?.name || 'Transactions' }[V.view]);
-const parentOf = v => ({ register: 'accounts', deleted: 'settings', activity: 'settings', settings: 'home' }[v]);
+const title = () => ({ home: D.me().name && D.backendKind() !== 'local' ? `Hello ${D.me().name}` : 'Home', budget: 'Budget', accounts: 'Accounts', insights: 'Insights', settings: 'Settings', deleted: 'Recently deleted', activity: 'Activity', archives: 'Archives', structure: 'Accounts and categories', register: V.account === '__all' ? 'All transactions' : V.account === '__approve' ? 'To approve' : D.account(V.account)?.name || 'Transactions' }[V.view]);
+const parentOf = v => ({ register: 'accounts', deleted: 'settings', activity: 'settings', archives: 'settings', structure: 'settings', settings: 'home' }[v]);
 
 export function render() {
   if (S.phase === 'signin') return gate('Home Budget', D.backendKind() === 'local' ? 'Try the budget on this phone. Nothing leaves it until Firebase is set up.' : 'Sign in with your Google account to open our budget.', `<button class="btn primary big" id="signin">${D.backendKind() === 'local' ? 'Start' : 'Sign in with Google'}</button><p class="err" id="err"></p>`);
@@ -32,7 +33,8 @@ export function render() {
   if (S.phase === 'loading') return gate('Home Budget', 'Loading our budget…');
   if (S.phase === 'nosdk') return gate('Needs a connection', 'Home Budget has to be online the first time it opens.', '<button class="btn primary" onclick="location.reload()">Try again</button>');
   if (!shell) drawShell();
-  if (D.isEmpty() && !['settings', 'activity', 'deleted'].includes(V.view)) V.view = 'welcome';
+  if (D.isEmpty() && !['settings', 'activity', 'deleted', 'archives', 'structure'].includes(V.view)) V.view = 'welcome';
+  if (!D.isEmpty() && V.view === 'welcome') V.view = 'home';
   const view = $('#view'), active = document.activeElement, main = TABS.some(t => t[0] === V.view) || V.view === 'welcome';
   const offline = !S.online || S.pending, waiting = D.unapproved().length;
   $('#top').innerHTML = `<div class="top-in"><div><div class="brand">${main ? icon('wallet') : `<button class="back" data-back aria-label="Back">${icon('chevron-left')}</button>`}<span>Home Budget</span>${D.backendKind() === 'local' ? '<span class="mode">This phone only</span>' : isTestEnv() ? '<span class="mode">Test</span>' : ''}${offline ? `<span class="sync">${icon('cloud-off')}<em>${S.online ? 'Syncing' : 'Offline'}</em></span>` : ''}</div><h1>${esc(V.view === 'welcome' ? 'Welcome' : title())}</h1>${goalBar()}</div><button class="menu" id="menu" aria-label="Menu">${icon('ellipsis-vertical')}</button></div>${WAVE}`;
@@ -40,20 +42,18 @@ export function render() {
   const selecting = V.selected.size > 0;
   root.classList.toggle('selecting', selecting);
   $('#selbar').innerHTML = selecting ? `<b>${V.selected.size}</b><button data-bulk="category">Category</button><button data-bulk="payee">Payee</button><button data-bulk="flag">Flag</button>${D.unapproved().some(t => V.selected.has(t.id)) ? '<button data-bulk="approve">Approve</button>' : '<button data-bulk="memo">Memo</button>'}<button data-bulk="delete" aria-label="Delete">${icon('trash-2')}</button><button data-bulk="cancel" aria-label="Cancel">${icon('x')}</button>` : '';
-  $('#fab').hidden = V.view === 'welcome' || ['settings', 'activity', 'deleted'].includes(V.view);
+  $('#fab').hidden = ['welcome', 'settings', 'activity', 'deleted', 'archives', 'structure'].includes(V.view);
   // Don't redraw under someone's typing; just refresh the list.
   if (active && view.contains(active) && /INPUT|TEXTAREA|SELECT/.test(active.tagName) && active.type !== 'range' && active.type !== 'checkbox') {
     dirty = true; if (active.id === 'reg-q') refreshRegister(); return;
   }
   dirty = false;
-  const html = { home: viewHome, budget: viewBudget, accounts: viewAccounts, register: viewRegister, insights: viewInsights, settings: viewSettings, deleted: viewDeleted, activity: viewActivity, welcome: viewWelcome }[V.view]();
+  const html = { home: viewHome, budget: viewBudget, accounts: viewAccounts, register: viewRegister, insights: viewInsights, settings: viewSettings, deleted: viewDeleted, activity: viewActivity, welcome: viewWelcome, archives: viewArchives, structure: viewStructure }[V.view]();
   const y = scrollY; view.innerHTML = html; view.className = `v-${V.view}`;
+  const sf = $('#start-file'); if (sf) sf.onchange = () => { if (sf.files[0]) importYnabFile(sf.files[0]); sf.value = ''; };
   if (V.view === 'settings') wireSettings(view, render); else { view.onchange = view.oninput = view.onclick = null; }
   if (S.error) { toast(S.error); S.error = null; }
   if (Math.abs(scrollY - y) > 2) scrollTo(0, y);
-}
-function viewWelcome() {
-  return `<section class="card hero"><div class="mid">Let's bring the budget across</div><p class="muted" style="margin:.5rem 0 1rem">Import the full export from YNAB. It's checked against YNAB's own figures before anything is saved.</p><button class="btn primary" data-go="settings">${icon('upload')} Go to import</button></section>`;
 }
 const go = v => { V.view = v; V.selected.clear(); if (v !== 'register') { V.filter = null; V.search = ''; } render(); scrollTo(0, 0); };
 addEventListener('hb:render', () => { render(); scrollTo(0, 0); });
@@ -77,6 +77,14 @@ root.addEventListener('click', async e => {
   if (d.go) return go(d.go);
   if (d.bulk) { if (d.bulk === 'cancel') { V.selected.clear(); return render(); } return bulk(d.bulk, () => { V.selected.clear(); render(); }); }
   if (V.view === 'settings') return;
+  if (d.start) return d.start === 'import' ? $('#start-file').click() : startFlow(d.start);
+  if (d.seenReset) { localStorage.setItem('hb.resetSeen', d.seenReset); return render(); }
+  if (d.archive) return openArchive(d.archive);
+  if (d.newAcct !== undefined) return newAccount();
+  if (d.newGroup !== undefined) return editGroup(null);
+  if (d.editGroup) return editGroup(d.editGroup);
+  if (d.newCat) return editCategory(null, d.newCat);
+  if (d.editCat) return editCategory(d.editCat);
   if (d.afford !== undefined) return openAfford();
   if (d.cat) return openCategory(d.cat, V.view === 'budget' ? V.month : E.thisMonth());
   if (d.month) { V.month = E.addMonths(V.month, +d.month); return render(); }

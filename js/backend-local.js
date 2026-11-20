@@ -23,6 +23,7 @@ export function connectLocal({ user = { uid: 'local', email: 'you@this.phone', d
     async signOut() { localStorage.removeItem(USER); this._cb?.(null); },
     listen(name, cb) { const f = () => cb(Object.entries(db[name] || {}).map(([id, d]) => ({ ...clone(d), id })), { fromCache: false, pending: false }); subs.add(f); setTimeout(f, 0); return () => subs.delete(f); },
     listenDoc(name, id, cb) { const f = () => cb(db[name]?.[id] ? clone(db[name][id]) : null, { fromCache: false, pending: false }); subs.add(f); setTimeout(f, 0); return () => subs.delete(f); },
+    async getDoc(name, id) { return db[name]?.[id] ? clone(db[name][id]) : null; },
     async getAll(name) { return Object.entries(db[name] || {}).map(([id, d]) => ({ ...clone(d), id })); },
     async write(ops) {
       db = load();

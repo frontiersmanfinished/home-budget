@@ -34,6 +34,7 @@ export async function connect() {
     listen(name, cb, onError) { return F.onSnapshot(colRef(name), { includeMetadataChanges: true }, s => cb(rows(s), meta(s)), onError); },
     listenDoc(name, id, cb, onError) { return F.onSnapshot(docRef(name, id), { includeMetadataChanges: true }, s => cb(s.exists() ? s.data() : null, meta(s)), onError); },
     async getAll(name) { return rows(await F.getDocs(colRef(name))); },
+    async getDoc(name, id) { const s = await F.getDoc(docRef(name, id)); return s.exists() ? s.data() : null; },
     /** ops: [{type:'set'|'update'|'delete'|'setFields'|'unsetFields', col, id, data, merge, fields:[[path[], value]], paths:[path[]]}].
      *  Queued on the phone straight away and sent in order when online. setFields replaces just the named fields,
      *  so two people editing different transactions in one month never overwrite each other. */
