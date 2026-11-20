@@ -116,3 +116,7 @@ input:not([type=checkbox]):not([type=range]):not([type=file]),select,textarea{wi
 .answer{font-size:1.25rem;font-weight:700;margin:.8rem 0 .2rem}.answer.yes{color:var(--ok)}.answer.no{color:var(--neg)}
 .vlist{display:grid;gap:.2rem}.diffs{max-height:14rem;overflow:auto;font-size:.8rem;background:var(--bg);border-radius:12px;padding:.5rem .7rem;margin:.4rem 0}
 .mode{font-size:.66rem;background:rgba(255,255,255,.45);padding:.05rem .45rem;border-radius:99px;margin-left:.35rem;font-weight:500}
+.daybar{display:flex;align-items:center;gap:.4rem;padding:.5rem;margin:.2rem 0 .5rem}.daybar>div{flex:1;text-align:center}.daybar small{display:block;color:var(--muted);font-size:.78rem}.daybar button{width:44px;height:44px;display:grid;place-items:center;border-radius:50%}
+.search .x{width:36px;height:36px}
+.qrow{padding:.5rem 0;border-bottom:1px solid var(--line);font-size:.86rem;display:grid;gap:.35rem}.qhelp code{font-size:.78rem;background:var(--bg);padding:.05rem .3rem;border-radius:6px;white-space:nowrap}
+.datechips{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.4rem}

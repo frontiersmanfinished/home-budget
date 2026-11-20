@@ -4,8 +4,9 @@ import { S } from './store.js';
 import { connect, configured, isTestEnv } from './backend.js';
 import { connectLocal } from './backend-local.js';
 import { $, $$, esc, icon, toast, applyFontSize, sheetOpen, closeSheet, openSheet, local } from './ui.js';
-import { V, viewHome, viewBudget, viewAccounts, viewRegister, registerList, viewInsights, goalBar } from './views.js';
-import { openTxn, openCategory, openAfford, openReconcile, editAccount, bulk } from './sheets.js';
+import { V, viewHome, viewBudget, viewAccounts, viewRegister, registerList, registerExtras, registerRows, viewInsights, goalBar } from './views.js';
+import * as Q from './search.js';
+import { openTxn, openCategory, openAfford, openReconcile, editAccount, bulk, openPlans, searchHelp, saveSearch } from './sheets.js';
 import { viewSettings, wireSettings, viewDeleted, viewActivity } from './pages.js';
 
 const root = $('#root');
@@ -42,7 +43,7 @@ export function render() {
   $('#fab').hidden = V.view === 'welcome' || ['settings', 'activity', 'deleted'].includes(V.view);
   // Don't redraw under someone's typing; just refresh the list.
   if (active && view.contains(active) && /INPUT|TEXTAREA|SELECT/.test(active.tagName) && active.type !== 'range' && active.type !== 'checkbox') {
-    dirty = true; if (active.id === 'reg-q') $('#reg-list').innerHTML = registerList(); return;
+    dirty = true; if (active.id === 'reg-q') refreshRegister(); return;
   }
   dirty = false;
   const html = { home: viewHome, budget: viewBudget, accounts: viewAccounts, register: viewRegister, insights: viewInsights, settings: viewSettings, deleted: viewDeleted, activity: viewActivity, welcome: viewWelcome }[V.view]();
@@ -86,6 +87,12 @@ root.addEventListener('click', async e => {
   if (d.acct) { V.account = d.acct; V.view = 'register'; V.search = ''; V.filter = null; V.shown = 120; V.selected.clear(); render(); return scrollTo(0, 0); }
   if (d.clearFilter !== undefined) { V.filter = null; return render(); }
   if (d.more !== undefined) { V.shown += 200; return render(); }
+  if (d.q !== undefined) return setSearch(d.q);
+  if (d.day) { const p = Q.parse(V.search); if (p.on) setSearch(Q.withOn(V.search, E.addDays(p.on, +d.day)).trim() + ' '); return; }
+  if (d.selectAll !== undefined) { registerRows().forEach(x => V.selected.add(x.id)); return render(); }
+  if (d.saveSearch !== undefined) return saveSearch(V.search);
+  if (d.searchHelp !== undefined) return searchHelp(q => setSearch(q));
+  if (d.bnpl !== undefined) return openPlans();
   if (d.reconcile) return openReconcile(d.reconcile);
   if (d.editAcct) return editAccount(d.editAcct);
   if (d.approveAll !== undefined) { const ids = D.unapproved().map(x => x.id); D.approve(ids); return toast(`Approved ${ids.length}`); }
@@ -93,7 +100,10 @@ root.addEventListener('click', async e => {
   if (d.clr) { const x = D.txn(d.clr); if (x?.cleared === 'r') return toast('Reconciled transactions are locked'); D.setCleared(d.clr); return; }
   const row = t.closest('.tx[data-tx]'); if (row) { if (V.selected.size) return toggleSel(row.dataset.tx); return openTxn(row.dataset.tx); }
 });
-root.addEventListener('input', e => { if (e.target.id === 'reg-q') { V.search = e.target.value; V.shown = 120; $('#reg-list').innerHTML = registerList(); } });
+let searchTimer;
+function refreshRegister() { $('#reg-extra') && ($('#reg-extra').innerHTML = registerExtras()); $('#reg-list') && ($('#reg-list').innerHTML = registerList()); }
+root.addEventListener('input', e => { if (e.target.id === 'reg-q') { V.search = e.target.value; V.shown = 120; clearTimeout(searchTimer); searchTimer = setTimeout(refreshRegister, 120); } });
+function setSearch(q) { V.search = q; V.shown = 120; const i = $('#reg-q'); if (i) { i.value = q; i.focus(); i.setSelectionRange(q.length, q.length); } refreshRegister(); }
 root.addEventListener('focusout', () => setTimeout(() => { if (dirty) render(); }, 50));
 function toggleSel(id) { V.selected.has(id) ? V.selected.delete(id) : V.selected.add(id); render(); }
 

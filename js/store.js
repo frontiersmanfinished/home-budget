@@ -8,14 +8,14 @@ export const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().t
 export const compact = o => JSON.parse(JSON.stringify(o, (k, v) => (v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length) ? undefined : v)));
 const clean = o => JSON.parse(JSON.stringify(o, (k, v) => (v === undefined ? null : v)));
 const noId = ({ id, ...rest }) => rest;
-const TXN_FIELDS = ['date', 'time', 'amount', 'accountId', 'payeeId', 'categoryId', 'memo', 'cleared', 'approved', 'flags', 'splits', 'transferAccountId', 'transferId', 'importId', 'importPayee', 'upId', 'upStatus', 'who', 'source', 'createdBy', 'createdAt', 'updatedAt', 'updatedBy', 'deletedAt', 'scheduledId'];
+const TXN_FIELDS = ['date', 'time', 'amount', 'accountId', 'payeeId', 'categoryId', 'memo', 'cleared', 'approved', 'flags', 'splits', 'transferAccountId', 'transferId', 'importId', 'importPayee', 'upId', 'upStatus', 'who', 'bnpl', 'receipt', 'matchedFrom', 'source', 'createdBy', 'createdAt', 'updatedAt', 'updatedBy', 'deletedAt', 'scheduledId'];
 const txnData = t => { const o = {}; for (const k of TXN_FIELDS) if (t[k] !== undefined) o[k] = t[k]; if (o.approved === true) delete o.approved; return compact(o); };
 
 export const DEFAULT_FLAGS = [{ id: 'f-reimburse', name: 'Reimburse', color: 'orange' }, { id: 'f-follow-up', name: 'Follow up', color: 'yellow' }];
 // Each person in Settings → People gets a tax flag of their own.
 const taxFlags = () => (S.config.people || []).filter(p => p.name).map((p, i) => ({ id: `f-tax-${p.id}`, name: `Tax – ${p.name}`, color: ['blue', 'purple', 'green'][i % 3] }));
 export const S = {
-  phase: 'loading', user: null, config: {}, accounts: [], groups: [], categories: [], payees: {}, scheduled: [], assigned: {}, open: [], months: {}, audit: [],
+  phase: 'loading', user: null, config: {}, accounts: [], groups: [], categories: [], payees: {}, scheduled: [], assigned: {}, open: [], months: {}, audit: [], bnpl: [],
   online: navigator.onLine, pending: false, synced: {}, error: null, v: 0,
 };
 let api, listeners = [], changed = () => {};
@@ -73,7 +73,7 @@ export async function start(backend) {
   addEventListener('offline', () => { S.online = false; notify(); });
   api.onUser(u => {
     listeners.forEach(off => off()); listeners = [];
-    Object.assign(S, { user: u, config: {}, accounts: [], groups: [], categories: [], payees: {}, scheduled: [], assigned: {}, open: [], months: {}, audit: [], synced: {} });
+    Object.assign(S, { user: u, config: {}, accounts: [], groups: [], categories: [], payees: {}, scheduled: [], assigned: {}, open: [], months: {}, audit: [], bnpl: [], synced: {} });
     S.phase = u ? 'loading' : 'signin';
     if (u) listenAll();
     notify();
@@ -82,7 +82,7 @@ export async function start(backend) {
 export const signIn = () => api.signIn();
 export const signOut = () => api.signOut();
 function denied(e) { console.error(e); if (e.code === 'permission-denied') { S.phase = 'denied'; notify(); } }
-const NEEDED = ['config', 'accounts', 'groups', 'categories', 'lists', 'assigned', 'txns', 'months', 'scheduled'];
+const NEEDED = ['config', 'accounts', 'groups', 'categories', 'lists', 'assigned', 'txns', 'months', 'scheduled', 'bnpl'];
 function listenAll() {
   const pendingBy = {};
   const seen = (name, m) => {
@@ -97,6 +97,7 @@ function listenAll() {
   col('assigned', r => { S.assigned = Object.fromEntries(r.map(({ id, ...cats }) => [id, cats])); });
   col('months', r => { S.months = Object.fromEntries(r.map(x => [x.id, x])); });
   col('audit', r => { S.audit = r.sort((a, b) => b.at - a.at); });
+  col('bnpl', r => { S.bnpl = r.sort((a, b) => (a.start || '').localeCompare(b.start || '')); });
   listeners.push(api.listenDoc('lists', 'payees', (d, m) => { S.payees = d || {}; seen('lists', m); }, denied));
   listeners.push(api.listenDoc('config', 'main', (d, m) => { S.config = d || {}; seen('config', m); }, denied));
 }
@@ -164,6 +165,7 @@ export function saveTxn(input, { text } = {}) {
   if (!was) Object.assign(t, { createdAt: now, createdBy: who, source: t.source || 'manual' });
   if (t.splits && t.splits.length < 2) { if (t.splits.length === 1) { t.categoryId = t.splits[0].categoryId; } t.splits = null; }
   if (t.splits) t.categoryId = null;
+  if (!was && !t.bnpl && !t.transferAccountId) { const l = autoInstalment(t); if (l) { t.bnpl = l.bnpl; if (!t.categoryId && !t.splits) t.categoryId = l.categoryId; } }
   const ops = [], undo = [];
   // The other side of a transfer.
   const pairWas = was?.transferId ? txn(was.transferId) : null;
@@ -273,3 +275,35 @@ export function fromBackup(b) {
   if (b?.kind !== 'home-budget-backup') throw new Error('That isn\'t a Home Budget backup.');
   const d = b.data; return { ...d, flags: d.config?.flags || [], name: 'backup' };
 }
+
+// ---- Buy now, pay later ----
+// A plan is one purchase paid in instalments. Each instalment is an ordinary transaction (it hits the budget when
+// the money leaves) carrying { planId, n }. Later instalments link automatically by provider and amount.
+export const BNPL_RE = /afterpay|zip ?pay|zip ?money|klarna|humm|latitude ?pay|paypal pay in 4|openpay|bundll/i;
+export const isBnplName = s => BNPL_RE.test(s || '');
+export const plan = id => S.bnpl.find(p => p.id === id);
+export const instalments = id => txns().filter(t => t.bnpl?.planId === id).sort((a, b) => a.bnpl.n - b.bnpl.n);
+export const planPaid = p => instalments(p.id).length;
+export const planLeft = p => Math.max(0, p.total - E.sum(instalments(p.id), t => -t.amount));
+export const openPlans = () => S.bnpl.filter(p => !p.closedAt && planPaid(p) < p.count);
+export const bnplOutstanding = () => E.sum(openPlans(), planLeft);
+export function bnplLabel(t) { const p = t?.bnpl && plan(t.bnpl.planId); return p ? `${p.shop} (${p.provider} ${t.bnpl.n} of ${p.count})` : ''; }
+const nextAmount = p => { const paid = planPaid(p); return paid >= p.count - 1 ? planLeft(p) : p.instalment; };
+/** The open plans a payment could belong to: same provider (if known) and the next instalment's amount. */
+export function plansFor(amount, providerText = '') {
+  const prov = (providerText.match(BNPL_RE) || [''])[0].toLowerCase().replace(/\s/g, '');
+  return openPlans().filter(p => Math.abs(nextAmount(p) - Math.abs(amount)) <= 1 && (!prov || p.provider.toLowerCase().replace(/\s/g, '').includes(prov.slice(0, 3))));
+}
+function autoInstalment(t) {
+  const name = payeeName(t.payeeId) || t.payeeText || t.importPayee || ''; if (!isBnplName(name) || t.amount >= 0) return null;
+  const ps = plansFor(t.amount, name); if (ps.length !== 1) return null;
+  return { bnpl: { planId: ps[0].id, n: planPaid(ps[0]) + 1 }, categoryId: ps[0].categoryId };
+}
+/** Start a plan from its first instalment. Returns the plan id. */
+export function startPlan({ provider, shop, total, count, categoryId, accountId, start }) {
+  const id = uid(), instalment = Math.round(total / count);
+  write([{ type: 'set', col: 'bnpl', id, data: clean({ provider, shop, total, count, instalment, categoryId, accountId, start, createdAt: Date.now(), createdBy: me().name }) }], `Started a ${provider} plan: ${shop}, ${E.fmt(total)} in ${count}`);
+  S.bnpl = [...S.bnpl, { id, provider, shop, total, count, instalment, categoryId, accountId, start }];
+  return id;
+}
+export const closePlan = id => write([{ type: 'update', col: 'bnpl', id, data: { closedAt: Date.now() } }], `Closed the ${plan(id)?.shop} plan`);

@@ -73,6 +73,33 @@ const file = path.join(os.tmpdir(), 'hb-sample-export.json'); fs.writeFileSync(f
   await a.click('.tx >> nth=0'); await a.click('#t-del'); await a.waitForTimeout(200); assert.equal(await avail(a, C.groc), '$680.00');
   await a.click('#toast button'); await a.waitForTimeout(200); assert.equal(await avail(a, C.groc), '$620.00');
   assert.equal(await rta(b), await rta(a));
+
+  // Search: terms, suggestions, the ? list, a day at a time, select all.
+  await a.click('[data-tab=accounts]'); await a.click('[data-acct=__all]'); await a.fill('#reg-q', '');
+  await a.type('#reg-q', 'cat'); await a.waitForTimeout(200); await a.click('#reg-extra [data-q="category:"]');
+  await a.type('#reg-q', 'groc'); await a.waitForTimeout(200); await a.click('#reg-extra .pill >> nth=0'); await a.waitForTimeout(200);
+  assert.equal(await a.inputValue('#reg-q'), 'category:Groceries ');
+  assert.equal(await a.locator('#reg-list .tx').count(), 2);
+  await a.fill('#reg-q', `on:02/${m0.slice(5)}/${m0.slice(0, 4)}`); await a.waitForTimeout(250);
+  assert.ok((await a.textContent('.daybar')).includes('Cleared that day: −$120.00'));
+  await a.click('[data-day="1"]'); await a.waitForTimeout(250); assert.ok((await a.inputValue('#reg-q')).includes(`on:03/${m0.slice(5)}`));
+  await a.fill('#reg-q', 'payee:grocer OR payee:cafe'); await a.waitForTimeout(250); assert.equal(await a.locator('#reg-list .tx').count(), 2);
+  await a.click('[data-select-all]'); assert.equal((await a.textContent('#selbar b')).trim(), '2'); await a.click('[data-bulk=cancel]');
+  await a.click('[data-search-help]'); await a.waitForTimeout(250); assert.ok(await a.locator('.qhelp .qrow').count() > 25);
+  await a.screenshot({ path: SHOTS + '/search-help.png' }); await a.click('[data-ex="is:unapproved"]'); await a.waitForTimeout(300);
+  assert.equal(await a.inputValue('#reg-q'), 'is:unapproved ');
+
+  // A date typed in part; Afterpay: start a plan, then the next payment links itself.
+  await a.click('#fab'); await a.fill('#t-amt', '25'); await a.fill('#t-payee', 'Afterpay'); await a.fill('#t-date-txt', '1'); await a.waitForTimeout(150);
+  assert.ok((await a.textContent('#t-date-show')).length > 0);
+  await a.click('#t-bnpl-btn'); await a.fill('#bn-shop', 'Anaconda'); await a.fill('#bn-total', '100'); await a.click('#bn-cat'); await a.fill('#pk-q', 'fun'); await a.click('.prow >> nth=0'); await a.waitForTimeout(250);
+  await a.click('#bn-start'); await a.waitForTimeout(250);
+  assert.ok((await a.textContent('#t-bnpl')).includes('Anaconda (Afterpay 1 of 4)'));
+  await a.screenshot({ path: SHOTS + '/bnpl.png' }); await a.click('#t-save'); await a.waitForTimeout(250);
+  await a.click('#fab'); await a.fill('#t-amt', '25'); await a.fill('#t-payee', 'Afterpay'); await a.click('#t-save'); await a.waitForTimeout(250);
+  await a.click('[data-tab=accounts]'); await a.waitForTimeout(150); assert.ok((await a.textContent('[data-bnpl]')).includes('$50.00'));
+  await a.click('[data-acct=__all]'); await a.fill('#reg-q', 'is:bnpl'); await a.waitForTimeout(250);
+  assert.deepEqual((await a.locator('#reg-list .tx b').allTextContents()).sort(), ['Anaconda (Afterpay 1 of 4)', 'Anaconda (Afterpay 2 of 4)']);
   await a.click('[data-tab=home]'); await a.screenshot({ path: SHOTS + '/home.png' });
   assert.deepEqual(errs, []);
   console.log('app tests passed');

@@ -5,6 +5,7 @@ import * as D from './store.js';
 import { S } from './store.js';
 import { $, $$, esc, icon, openSheet, closeSheet, toast, confirmBox, pickFrom } from './ui.js';
 import { V, goal, flagColour } from './views.js';
+import * as Q from './search.js';
 
 const money = c => esc(E.fmt(c));
 const amountText = c => (c ? (Math.abs(c) / 100).toFixed(2) : '');
@@ -46,7 +47,8 @@ export function openTxn(id, preset = {}) {
     <label class="fld"><span>Payee</span><div class="ac"><input id="t-payee" value="${esc(payeeText)}" placeholder="Who was it?" autocomplete="off"><div class="ac-list" id="t-ac" hidden></div></div></label>
     <div id="t-catbox"></div>
     <label class="fld"><span>Account</span><select id="t-acct">${accts.map(a => `<option value="${esc(a.id)}"${a.id === t.accountId ? ' selected' : ''}>${esc(a.name)}</option>`).join('')}</select></label>
-    <div class="row in" style="gap:.6rem"><label class="fld" style="flex:1;margin-top:.6rem"><span>Date</span><input type="date" id="t-date" value="${esc(t.date)}"></label><label class="sw-row" style="margin-top:1.4rem"><span>Cleared</span><input type="checkbox" id="t-clr"${t.cleared !== 'u' ? ' checked' : ''}${locked ? ' disabled' : ''}><i></i></label></div>
+    <div class="row in" style="gap:.6rem;align-items:flex-end"><label class="fld" style="flex:1;margin-top:.6rem"><span>Date</span><div class="row in" style="margin:0;gap:.3rem"><input id="t-date-txt" value="${esc(Q.auDate(t.date))}" inputmode="numeric" autocomplete="off" aria-describedby="t-date-show"><button class="x" id="t-cal" aria-label="Calendar">${icon('calendar')}</button><input type="date" id="t-date" value="${esc(t.date)}" tabindex="-1" style="position:absolute;opacity:0;width:1px;height:1px;pointer-events:none"></div></label><label class="sw-row"><span>Cleared</span><input type="checkbox" id="t-clr"${t.cleared !== 'u' ? ' checked' : ''}${locked ? ' disabled' : ''}><i></i></label></div>
+    <div id="t-date-show" class="datechips"></div>
     <label class="fld"><span>Memo</span><input id="t-memo" value="${esc(t.memo || '')}" placeholder="Optional note" autocomplete="off"></label>
     <div class="fld"><span class="lbl">Flags</span><div class="pills wrap" id="t-flags">${D.flags().map(f => `<button class="pill${(t.flags || []).includes(f.id) ? ' on' : ''}" data-flag="${esc(f.id)}"><i class="fdot" style="background:${esc(flagColour(f.color))}"></i>${esc(f.name)}</button>`).join('')}</div></div>
     ${was ? `<p class="muted f-sub">${esc([was.createdBy && `Added by ${was.createdBy}`, was.updatedBy && was.updatedAt && `changed by ${was.updatedBy} ${new Date(was.updatedAt).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })}`, was.time && `bank time ${was.time}`, was.importPayee && `bank name: ${was.importPayee}`].filter(Boolean).join(', '))}</p>` : ''}
@@ -70,6 +72,23 @@ export function openTxn(id, preset = {}) {
     box.innerHTML = `<div class="fld"><span class="lbl">Category</span><div class="row in"><button class="btn ghost grow" id="t-cat" style="justify-content:flex-start">${esc(D.categoryLabel(t.categoryId) || 'Choose a category')}</button><button class="btn ghost" id="t-split" aria-label="Split">${icon('split')}</button></div></div>`;
   }
   setDir(inflow ? 'in' : 'out');
+  // Dates can be typed in part: "19" is the 19th of this month, "19/10" is 19 October.
+  const dTxt = $('#t-date-txt', b), dIso = $('#t-date', b), dShow = $('#t-date-show', b);
+  const showDate = () => {
+    const ch = Q.dateChoices(dTxt.value);
+    if (!ch.length) { dShow.innerHTML = dTxt.value.trim() ? '<small class="needs">Not a date. Try 19 or 19/10.</small>' : ''; return; }
+    if (!ch.includes(dIso.value)) dIso.value = ch[0];
+    dShow.innerHTML = ch.map(d => `<button class="pill${d === dIso.value ? ' on' : ''}" data-date="${d}">${esc(Q.longDate(d))}</button>`).join('');
+  };
+  dTxt.oninput = () => { dIso.value = ''; showDate(); };
+  dTxt.onfocus = () => dTxt.select();
+  dIso.onchange = () => { if (dIso.value) { dTxt.value = Q.auDate(dIso.value); showDate(); } };
+  const drawBnpl = () => {
+    let box = $('#t-bnpl', b); if (!box) { box = document.createElement('div'); box.id = 't-bnpl'; $('#t-catbox', b).after(box); }
+    const show = !t.transferAccountId && !inflow && (t.bnpl || D.isBnplName(payee.value));
+    box.innerHTML = show ? `<button class="pill${t.bnpl ? ' on' : ''}" id="t-bnpl-btn" style="margin-top:.5rem">${icon('receipt')} ${t.bnpl ? esc(D.bnplLabel(t) || 'Buy now, pay later') : 'Buy now, pay later: which purchase?'}</button>` : '';
+  };
+  drawBnpl();
   if (!was) setTimeout(() => { if (!b.contains(document.activeElement)) amt.focus(); }, 250);
   // Payee autocomplete: payees, then transfers.
   const drawAc = () => {
@@ -79,15 +98,18 @@ export function openTxn(id, preset = {}) {
     ac.innerHTML = ps.map(([pid, p]) => `<button data-payee="${esc(pid)}"><span>${esc(p.name)}</span><small>${esc(D.categoryLabel(D.usualCategory(pid)))}</small></button>`).join('') + tr.map(a => `<button data-xfer="${esc(a.id)}"><span>Transfer ${inflow ? 'from' : 'to'} ${esc(a.name)}</span>${icon('arrow-left-right')}</button>`).join('');
     ac.hidden = !ac.innerHTML;
   };
-  payee.oninput = () => { t.payeeId = null; if (t.transferAccountId) { t.transferAccountId = null; drawCat(); } drawAc(); };
+  payee.oninput = () => { t.payeeId = null; if (t.transferAccountId) { t.transferAccountId = null; drawCat(); } drawAc(); drawBnpl(); };
   payee.onblur = () => setTimeout(() => { ac.hidden = true; }, 150);
   b.addEventListener('input', e => { const i = e.target.dataset.splitAmt; if (i !== undefined) { const v = Math.abs(E.parseMoney(e.target.value) || 0); splits[i].amount = inflow ? v : -v; const left = signed() - E.sum(splits, s => s.amount); const sm = $('#t-catbox small', b); if (sm) { sm.textContent = left ? `${E.fmt(Math.abs(left))} left to split` : 'All split'; sm.className = left ? 'needs' : 'muted'; } } });
   amt.addEventListener('input', () => { if (splits) drawCat(); });
   $('#t-acct', b).onchange = () => { t.accountId = $('#t-acct', b).value; drawCat(); };
   b.addEventListener('click', e => {
     const x = e.target.closest('button'); if (!x) return; const d = x.dataset;
-    if (d.dir) return setDir(d.dir);
-    if (d.payee) { t.payeeId = d.payee; t.transferAccountId = null; payee.value = S.payees[d.payee].name; ac.hidden = true; const pc = D.usualCategory(d.payee); if (pc && !splits && D.category(pc)) t.categoryId = pc; drawCat(); return; }
+    if (d.dir) { setDir(d.dir); return drawBnpl(); }
+    if (d.date) { dIso.value = d.date; dTxt.value = Q.auDate(d.date); return showDate(); }
+    if (x.id === 't-cal') { try { dIso.showPicker(); } catch { dIso.focus(); } return; }
+    if (x.id === 't-bnpl-btn') return bnplSheet({ amount: signed(), payeeText: payee.value, date: dIso.value || E.today(), accountId: $('#t-acct', b).value, current: t.bnpl }, r => { t.bnpl = r.bnpl; if (r.categoryId && !splits) t.categoryId = r.categoryId; drawCat(); drawBnpl(); });
+    if (d.payee) { t.payeeId = d.payee; t.transferAccountId = null; payee.value = S.payees[d.payee].name; ac.hidden = true; const pc = D.usualCategory(d.payee); if (pc && !splits && D.category(pc) && !D.isBnplName(payee.value)) t.categoryId = pc; drawCat(); drawBnpl(); return; }
     if (d.xfer) { t.transferAccountId = d.xfer; t.payeeId = null; payee.value = `Transfer ${inflow ? 'from' : 'to'} ${D.account(d.xfer).name}`; ac.hidden = true; splits = null; drawCat(); return; }
     if (d.flag) { const f = t.flags || (t.flags = []); const i = f.indexOf(d.flag); i >= 0 ? f.splice(i, 1) : f.push(d.flag); x.classList.toggle('on'); return; }
     if (x.id === 't-cat') return pickCategory('Category', id => { t.categoryId = id; drawCat(); }, { rta: true, m: E.monthOf($('#t-date', b).value || E.today()) });
@@ -106,7 +128,8 @@ export function openTxn(id, preset = {}) {
     if (!$('#t-acct', b).value) return toast('Choose an account');
     if (splits) { const left = amount - E.sum(splits, s => s.amount); if (left) return toast(`${E.fmt(Math.abs(left))} still to split`); if (splits.some(s => s.categoryId === undefined)) return toast('Choose a category for each line'); }
     if (t.transferAccountId === $('#t-acct', b).value) return toast('Pick a different account to transfer to');
-    const out = { ...t, amount, accountId: $('#t-acct', b).value, date: $('#t-date', b).value || E.today(), memo: $('#t-memo', b).value.trim(), splits, cleared: locked ? 'r' : $('#t-clr', b).checked ? (t.cleared === 'r' ? 'r' : 'c') : 'u', approved: was?.approved === false ? false : true };
+    if (!dIso.value) return toast('Check the date: try 19 or 19/10');
+    const out = { ...t, amount, accountId: $('#t-acct', b).value, date: dIso.value, memo: $('#t-memo', b).value.trim(), splits, cleared: locked ? 'r' : $('#t-clr', b).checked ? (t.cleared === 'r' ? 'r' : 'c') : 'u', approved: was?.approved === false ? false : true };
     if (!out.transferAccountId && !out.payeeId && payee.value.trim()) out.payeeText = payee.value.trim();
     const go = () => {
       localStorage.setItem('hb.lastAcct', out.accountId);
@@ -242,4 +265,50 @@ export function bulk(kind, done) {
   if (kind === 'flag') return pickFrom('Add or remove a flag', D.flags().map(f => ({ label: f.name, value: f.id })), fid => { const all = ids.every(id => (D.txn(id).flags || []).includes(fid)); ids.forEach(id => { const t = D.txn(id), f = new Set(t.flags || []); all ? f.delete(fid) : f.add(fid); D.bulkEdit([id], { flags: [...f] }, null); }); done(); toast(all ? 'Flag removed' : 'Flag added'); });
   if (kind === 'approve') { D.approve(ids); done(); return toast('Approved'); }
   if (kind === 'delete') return confirmBox(`Delete ${ids.length} transactions?`, 'They go to Recently deleted, where they can be restored.', 'Delete', () => { const undo = D.deleteTxns(ids); done(); toast('Deleted', { label: 'Undo', run: undo }); });
+}
+
+// ---- Search help and saved searches ----
+export function searchHelp(use) {
+  const b = openSheet(`<h2>Search terms</h2><p class="muted f-sub">Tap an example to use it. Dates are day/month/year and can be typed in part: <code>19</code> or <code>19/10</code>.</p><div class="qhelp">${Q.OPERATORS.map(([op, ex, what]) => `<div class="qrow"><div><b>${esc(op)}</b> <span class="muted">${esc(what)}</span></div><div class="pills wrap" style="padding:0">${ex.split(' or ').map(x => `<button class="pill" data-ex="${esc(x)}" style="min-height:34px"><code>${esc(x)}</code></button>`).join('')}</div></div>`).join('')}</div>`);
+  b.onclick = e => { const x = e.target.closest('[data-ex]'); if (x) { closeSheet(); setTimeout(() => use(x.dataset.ex + ' '), 230); } };
+}
+export function saveSearch(q) {
+  q = q.trim(); if (!q) return toast('Type a search first');
+  const list = S.config.savedSearches || [], i = list.findIndex(s => s.q === q);
+  if (i >= 0) return confirmBox('Remove this saved search?', list[i].name, 'Remove', () => D.patchConfig({ savedSearches: list.filter((_, k) => k !== i) }, 'Removed a saved search'));
+  const b = openSheet(`<h2>Save this search</h2><p><code>${esc(q)}</code></p><label class="fld"><span>Name</span><input id="ss-name" value="${esc(q.slice(0, 30))}" autocomplete="off"></label><p class="muted f-sub">Saved searches show under the search box on both phones.</p><div class="row end"><button class="btn primary" id="ss-save">Save</button></div>`);
+  $('#ss-save', b).onclick = () => { D.patchConfig({ savedSearches: [...list, { name: $('#ss-name', b).value.trim() || q, q }] }, 'Saved a search'); closeSheet(); toast('Saved'); };
+}
+
+// ---- Buy now, pay later ----
+export function openPlans() {
+  const ps = D.openPlans();
+  const b = openSheet(`<h2>Buy now, pay later</h2><p class="muted f-sub">${money(D.bnplOutstanding())} still to pay. Each instalment comes out of the budget when it's paid.</p><div class="vlist">${ps.map(p => { const paid = D.planPaid(p); return `<div class="card" style="padding:.7rem .85rem"><div class="row"><b class="grow">${esc(p.shop)}</b><span class="money">${money(D.planLeft(p))} left</span></div><small class="muted">${esc(p.provider)} · ${paid} of ${p.count} paid · ${esc(D.categoryLabel(p.categoryId))} · ${money(p.total)} total</small><span class="bar"><i style="width:${(paid / p.count * 100).toFixed(0)}%"></i></span><div class="row end" style="margin-top:.4rem"><button class="btn ghost" data-close-plan="${esc(p.id)}" style="min-height:38px">Mark finished</button></div></div>`; }).join('') || '<p class="muted">No plans being paid off.</p>'}</div>`);
+  b.onclick = e => { const x = e.target.closest('[data-close-plan]'); if (x) confirmBox('Mark this plan finished?', 'Use this if it was paid off early or cancelled.', 'Mark finished', () => { D.closePlan(x.dataset.closePlan); closeSheet(); }, false); };
+}
+/** Link a payment to a plan, or start one. Calls back with { bnpl, categoryId }. */
+export function bnplSheet({ amount, payeeText, date, accountId, current }, done) {
+  const cents = Math.abs(amount), provider = (payeeText.match(D.BNPL_RE) || ['Afterpay'])[0].replace(/^./, c => c.toUpperCase());
+  const matches = D.plansFor(cents, payeeText);
+  let catId = null;
+  const b = openSheet(`<h2>Buy now, pay later</h2>
+    ${current ? `<p>Linked to <b>${esc(D.bnplLabel({ bnpl: current }))}</b>.</p><button class="btn ghost wide" id="bn-unlink">Unlink</button>` : ''}
+    ${matches.length ? `<div class="lbl" style="margin-top:.6rem">Next payment on</div><div class="pick">${matches.map(p => `<button class="pick-row" data-plan="${esc(p.id)}"><span>${esc(p.shop)}<small>${esc(p.provider)} ${D.planPaid(p) + 1} of ${p.count} · ${esc(D.categoryLabel(p.categoryId))}</small></span></button>`).join('')}</div>` : ''}
+    <div class="lbl" style="margin-top:.8rem">${matches.length ? 'Or a new purchase' : 'First payment on a new purchase'}</div>
+    <label class="fld"><span>Shop</span><input id="bn-shop" placeholder="e.g. Anaconda" autocomplete="off"></label>
+    <div class="row in" style="gap:.6rem"><label class="fld" style="flex:1"><span>Total price</span><input id="bn-total" inputmode="decimal" value="${cents ? (cents * 4 / 100).toFixed(2) : ''}"></label><label class="fld" style="width:7rem"><span>Payments</span><input id="bn-count" inputmode="numeric" value="4"></label></div>
+    <div class="fld"><span class="lbl">Category</span><button class="btn ghost wide" id="bn-cat">Choose a category</button></div>
+    <div class="row end"><button class="btn primary" id="bn-start">Start plan</button></div>`);
+  b.addEventListener('click', e => {
+    const x = e.target.closest('button'); if (!x) return;
+    if (x.id === 'bn-unlink') { closeSheet(); done({ bnpl: null }); }
+    if (x.dataset.plan) { const p = D.plan(x.dataset.plan); closeSheet(); done({ bnpl: { planId: p.id, n: D.planPaid(p) + 1 }, categoryId: p.categoryId }); }
+    if (x.id === 'bn-cat') pickCategory('What was bought?', id => { catId = id; $('#bn-cat', b).textContent = D.categoryLabel(id); });
+    if (x.id === 'bn-start') {
+      const shop = $('#bn-shop', b).value.trim(), total = Math.abs(E.parseMoney($('#bn-total', b).value) || 0), count = Math.max(2, Math.min(52, parseInt($('#bn-count', b).value, 10) || 4));
+      if (!shop || !total || !catId) return toast('Add the shop, total and category');
+      const planId = D.startPlan({ provider, shop, total, count, categoryId: catId, accountId, start: date });
+      closeSheet(); done({ bnpl: { planId, n: 1 }, categoryId: catId });
+    }
+  });
 }
