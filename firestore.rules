@@ -1,0 +1,20 @@
+rules_version = '2';
+// Only the two household Google accounts can read or change the budget.
+// Replace the two emails below before publishing these rules in the Firebase console (Firestore → Rules).
+// Keep the real emails out of this public repository.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function household() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email.lower() in ['first.person@gmail.com', 'second.person@gmail.com'];
+    }
+    match /households/budget/{document=**} {
+      allow read, write: if household();
+    }
+    // Everything else is closed.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

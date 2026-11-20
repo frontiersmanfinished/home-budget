@@ -1,0 +1,7 @@
+node_modules/
+*.log
+# Never commit real budget data
+*export*.json
+ynab*.json
+*.backup.json
+home-budget-backup-*.json

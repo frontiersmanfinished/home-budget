@@ -1,0 +1,22 @@
+{
+  "name": "Home Budget",
+  "short_name": "Budget",
+  "description": "Our household budget",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FAF7F2",
+  "theme_color": "#A6C9BA",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Add transaction", "short_name": "Add", "url": "./?add=1", "icons": [{ "src": "icons/shortcut-add.png", "sizes": "96x96", "type": "image/png" }] },
+    { "name": "Can we afford this?", "short_name": "Afford?", "url": "./?afford=1", "icons": [{ "src": "icons/shortcut-afford.png", "sizes": "96x96", "type": "image/png" }] }
+  ]
+}
