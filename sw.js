@@ -1,6 +1,6 @@
 // Keeps the app and the Firebase code on the phone so it opens with no signal.
 // Bump VERSION with each release. A new version waits until the app asks it to take over.
-const VERSION = 'v11';
+const VERSION = 'v12';
 const APP_CACHE = `home-budget-${VERSION}`;
 const SDK_CACHE = 'home-budget-sdk-12.18.0';
 const SDK = ['app', 'auth', 'firestore'].map(n => `https://www.gstatic.com/firebasejs/12.18.0/firebase-${n}.js`);

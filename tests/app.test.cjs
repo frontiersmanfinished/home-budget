@@ -102,6 +102,17 @@ const file = path.join(os.tmpdir(), 'hb-sample-export.json'); fs.writeFileSync(f
   assert.deepEqual((await a.locator('#reg-list .tx b').allTextContents()).sort(), ['Anaconda (Afterpay 1 of 4)', 'Anaconda (Afterpay 2 of 4)']);
   await a.click('[data-tab=home]'); await a.screenshot({ path: SHOTS + '/home.png' });
 
+
+  // Up sync: records already in the inbox come in when an account is linked, without a reload.
+  await a.evaluate(({ chq }) => { const d = JSON.parse(localStorage.getItem('hb.local.db')); const iso = new Date(Date.now() - 3600e3).toISOString();
+    d.upInbox = { U1: { upId: 'U1', acct: 'UPX', status: 'SETTLED', desc: 'Corner Bakery', amt: -730, created: iso, who: 'Alex' } };
+    d.sync = { state: { lastOk: Date.now() - 3600e3, lastRun: Date.now() - 3600e3, accounts: [{ id: 'UPX', name: '2Up Everyday', type: 'TRANSACTIONAL', balance: 0 }], heldIds: [], webhooks: [] } };
+    localStorage.setItem('hb.local.db', JSON.stringify(d)); }, { chq: A.chq });
+  await a.reload(); await a.waitForSelector('#nav'); await a.waitForTimeout(800);
+  await a.click('#menu'); await a.click('[data-m=settings]'); await a.waitForTimeout(200);
+  await a.selectOption('[data-up-choice="UPX"]', A.chq); await a.fill('[data-up-from="UPX"]', m0 + '-01'); await a.click('[data-up-save="UPX"]'); await a.waitForTimeout(1200);
+  await a.click('[data-tab=accounts]'); await a.click('[data-acct=__all]'); await a.fill('#reg-q', 'payee:"corner bakery"'); await a.waitForTimeout(300);
+  assert.equal(await a.locator('#reg-list .tx').count(), 1, 'the Up record came in after linking');
   // Complete reset (backup first, type RESET), then start again with basic categories.
   await a.click('#menu'); await a.click('[data-m=settings]'); await a.click('[data-reset]'); assert.ok(await a.isDisabled('#rs-go'));
   await a.fill('#rs-word', 'RESET'); const [dl] = await Promise.all([a.waitForEvent('download'), a.click('#rs-go')]); assert.ok(dl.suggestedFilename().startsWith('home-budget-before-reset'));

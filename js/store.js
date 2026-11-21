@@ -92,7 +92,7 @@ function listenAll() {
   const seen = (name, m) => {
     if (!m.fromCache) S.synced[name] = true; S.synced['_' + name] = true;
     pendingBy[name] = m.pending; S.pending = Object.values(pendingBy).some(Boolean);
-    if (S.phase === 'loading' && NEEDED.every(n => S.synced['_' + n])) { S.phase = 'app'; setTimeout(housekeeping, 50); }
+    if (S.phase === 'loading' && NEEDED.every(n => S.synced['_' + n])) { S.phase = 'app'; setTimeout(housekeeping, 50); scheduleUp(); }
     notify();
   };
   const col = (name, fn) => listeners.push(api.listen(name, (rows, m) => { fn(rows); seen(name, m); }, denied));
@@ -108,7 +108,10 @@ function listenAll() {
   listeners.push(api.listenDoc('meta', 'reset', d => { S.reset = d; notify(); }, denied));
   col('bnpl', r => { S.bnpl = r.sort((a, b) => (a.start || '').localeCompare(b.start || '')); });
   listeners.push(api.listenDoc('lists', 'payees', (d, m) => { S.payees = d || {}; seen('lists', m); }, denied));
-  listeners.push(api.listenDoc('config', 'main', (d, m) => { S.config = d || {}; seen('config', m); }, denied));
+  listeners.push(api.listenDoc('config', 'main', (d, m) => {
+    const before = JSON.stringify(S.config.up?.links || {}); S.config = d || {}; seen('config', m);
+    if (JSON.stringify(S.config.up?.links || {}) !== before) scheduleUp(); // an account was just linked
+  }, denied));
 }
 export const isEmpty = () => !S.accounts.length && !S.categories.length;
 
@@ -471,11 +474,12 @@ export async function completeReset() {
 // ---- Up sync: the app's half ----
 // The GitHub job writes Up records to the inbox; any signed-in phone turns them into transactions.
 // planSync gives the same answer on both phones, and ids are fixed, so nothing is ever doubled.
-let upTimer = null, upRunning = false;
+let upTimer = null, upRunning = false, upAgain = false;
 function scheduleUp() { clearTimeout(upTimer); upTimer = setTimeout(() => processUp().catch(e => console.error('Up sync', e)), 600); }
 export const upLinks = () => S.config.up?.links || {};
 export async function processUp() {
-  if (upRunning || S.phase !== 'app' || isEmpty() || !S.inbox.length || !Object.keys(upLinks()).length) return null;
+  if (upRunning) { upAgain = true; return null; }
+  if (S.phase !== 'app' || isEmpty() || !S.inbox.length || !Object.keys(upLinks()).length) return null;
   upRunning = true;
   try {
     const ops = [], names = {};
@@ -497,7 +501,7 @@ export async function processUp() {
     for (const u of plan.updates) { const was = byId.get(u.id); if (was) ops.push(...placeOps({ ...was, ...u.fields })); }
     await commit(ops, `Up sync: ${plan.creates.length} new, ${plan.updates.length} updated`);
     return plan;
-  } finally { upRunning = false; }
+  } finally { upRunning = false; if (upAgain) { upAgain = false; scheduleUp(); } }
 }
 export const saveSyncSettings = (data, text) => write([{ type: 'set', col: 'sync', id: 'settings', data: clean(data), merge: true }], text);
 export const syncNow = () => saveSyncSettings({ requestNow: Date.now(), paused: false }, 'Asked for an Up sync');
