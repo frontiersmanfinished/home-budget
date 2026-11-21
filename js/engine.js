@@ -212,7 +212,8 @@ export function pacing(st, m, day) {
 export function findMatch(rec, txns) {
   let best = null, bestGap = 99;
   for (const t of txns) {
-    if (!live(t) || t.accountId !== rec.accountId || t.upId || t.importId || t.cleared === 'r' || t.amount !== rec.amount) continue;
+    // YNAB's own import markers don't count: those entries came from YNAB, not from this app's bank feeds.
+    if (!live(t) || t.accountId !== rec.accountId || t.upId || (t.importId && t.source !== 'ynab') || t.cleared === 'r' || t.amount !== rec.amount) continue;
     const gap = Math.abs(diffDays(t.date, rec.date)); if (gap <= 7 && gap < bestGap) { best = t; bestGap = gap; }
   }
   return best;

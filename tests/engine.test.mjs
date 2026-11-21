@@ -88,6 +88,8 @@ const manual = [{ id: 'm1', accountId: 'chq', amount: -4550, date: '2026-11-18',
 assert.equal(E.findMatch({ accountId: 'chq', amount: -4550, date: '2026-11-19' }, manual).id, 'm1');
 assert.equal(E.findMatch({ accountId: 'chq', amount: -4551, date: '2026-11-19' }, manual), null);
 assert.equal(E.findMatch({ accountId: 'chq', amount: -4550, date: '2026-12-19' }, manual), null);
+assert.equal(E.findMatch({ accountId: 'chq', amount: -999, date: '2026-11-18' }, [{ id: 'y', accountId: 'chq', amount: -999, date: '2026-11-17', cleared: 'c', importId: 'YNAB:-999:2026-11-17:1', source: 'ynab' }]).id, 'y'); // imported into YNAB from a file
+assert.equal(E.findMatch({ accountId: 'chq', amount: -999, date: '2026-11-18' }, [{ id: 'z', accountId: 'chq', amount: -999, date: '2026-11-17', cleared: 'c', upId: 'U9' }]), null); // already from Up
 
 // Lifestyle creep
 const spend = { '2026-01': { fun: 100 }, '2026-02': { fun: 100 }, '2026-03': { fun: 100 }, '2026-04': { fun: 100 }, '2026-05': { fun: 100 }, '2026-06': { fun: 100 }, '2026-07': { fun: 100 }, '2026-08': { fun: 100 }, '2026-09': { fun: 100 }, '2026-10': { fun: 400 } };
