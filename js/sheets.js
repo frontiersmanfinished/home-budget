@@ -6,6 +6,7 @@ import { S } from './store.js';
 import { $, $$, esc, icon, openSheet, closeSheet, toast, confirmBox, pickFrom } from './ui.js';
 import { V, goal, flagColour, upAccountFor } from './views.js';
 import * as Q from './search.js';
+import { bindTill } from './till.js';
 
 const money = c => esc(E.fmt(c));
 const amountText = c => (c ? (Math.abs(c) / 100).toFixed(2) : '');
@@ -43,7 +44,7 @@ export function openTxn(id, preset = {}) {
   const b = openSheet(`<div class="f-head"><b class="f-title grow">${was ? 'Transaction' : 'New transaction'}</b><button class="x" data-close aria-label="Close">${icon('x')}</button></div>
     ${locked ? `<div class="banner">${icon('lock')}<span>Reconciled. Changes here alter a balance the bank has confirmed.</span></div>` : ''}
     <div class="seg two" id="t-dir" style="margin-top:.6rem"><button data-dir="out">Money out</button><button data-dir="in">Money in</button></div>
-    <input class="amount-in" id="t-amt" inputmode="decimal" placeholder="0.00" value="${amountText(t.amount)}" aria-label="Amount" autocomplete="off">
+    <div class="amtrow"><button class="opbtn" data-op="-" aria-label="Subtract">−</button><input class="amount-in" id="t-amt" aria-label="Amount"><button class="opbtn" data-op="+" aria-label="Add">+</button></div><div class="sumline" id="t-sum" aria-live="polite"></div>
     <label class="fld"><span>Payee</span><div class="ac"><input id="t-payee" value="${esc(payeeText)}" placeholder="Who was it?" autocomplete="off"><div class="ac-list" id="t-ac" hidden></div></div></label>
     <div id="t-catbox"></div>
     <label class="fld"><span>Account</span><select id="t-acct">${accts.map(a => `<option value="${esc(a.id)}"${a.id === t.accountId ? ' selected' : ''}>${esc(a.name)}</option>`).join('')}</select></label>
@@ -55,7 +56,8 @@ export function openTxn(id, preset = {}) {
     <div class="row end sticky">${was ? `<button class="btn danger" id="t-del">${icon('trash-2')} Delete</button><span class="grow"></span>` : ''}${was?.approved === false ? `<button class="btn ghost" id="t-approve">Approve</button>` : ''}<button class="btn primary" id="t-save">Save</button></div>`);
   const amt = $('#t-amt', b), payee = $('#t-payee', b), ac = $('#t-ac', b);
   const setDir = d => { inflow = d === 'in'; $$('#t-dir button', b).forEach(x => x.classList.toggle('on', x.dataset.dir === d)); drawCat(); };
-  const signed = () => { const v = Math.abs(E.parseMoney(amt.value) || 0); return inflow ? v : -v; };
+  const tl = bindTill(amt, Math.abs(t.amount || 0), (c, isSum) => { $('#t-sum', b).textContent = isSum ? `= ${E.fmt(Math.abs(c))}` : ''; if (splits) drawCat(); });
+  const signed = () => { const v = Math.abs(tl.cents); return inflow ? v : -v; };
   function drawCat() {
     const box = $('#t-catbox', b);
     if (t.transferAccountId) {
@@ -81,7 +83,10 @@ export function openTxn(id, preset = {}) {
     dShow.innerHTML = ch.map(d => `<button class="pill${d === dIso.value ? ' on' : ''}" data-date="${d}">${esc(Q.longDate(d))}</button>`).join('');
   };
   dTxt.oninput = () => { dIso.value = ''; showDate(); };
-  dTxt.onfocus = () => dTxt.select();
+  // On a phone, tapping the date opens the picker straight away; on a computer, dates can be typed in part.
+  const touch = matchMedia('(pointer: coarse)').matches;
+  if (touch) { dTxt.readOnly = true; dTxt.setAttribute('inputmode', 'none'); dTxt.onclick = () => { if (!dIso.value) dIso.value = E.today(); try { dIso.showPicker(); } catch { dIso.focus(); } }; }
+  else dTxt.onfocus = () => dTxt.select();
   dIso.onchange = () => { if (dIso.value) { dTxt.value = Q.auDate(dIso.value); showDate(); } };
   const drawBnpl = () => {
     let box = $('#t-bnpl', b); if (!box) { box = document.createElement('div'); box.id = 't-bnpl'; $('#t-catbox', b).after(box); }
@@ -101,10 +106,10 @@ export function openTxn(id, preset = {}) {
   payee.oninput = () => { t.payeeId = null; if (t.transferAccountId) { t.transferAccountId = null; drawCat(); } drawAc(); drawBnpl(); };
   payee.onblur = () => setTimeout(() => { ac.hidden = true; }, 150);
   b.addEventListener('input', e => { const i = e.target.dataset.splitAmt; if (i !== undefined) { const v = Math.abs(E.parseMoney(e.target.value) || 0); splits[i].amount = inflow ? v : -v; const left = signed() - E.sum(splits, s => s.amount); const sm = $('#t-catbox small', b); if (sm) { sm.textContent = left ? `${E.fmt(Math.abs(left))} left to split` : 'All split'; sm.className = left ? 'needs' : 'muted'; } } });
-  amt.addEventListener('input', () => { if (splits) drawCat(); });
   $('#t-acct', b).onchange = () => { t.accountId = $('#t-acct', b).value; drawCat(); };
   b.addEventListener('click', e => {
     const x = e.target.closest('button'); if (!x) return; const d = x.dataset;
+    if (d.op) { amt.focus(); return tl.key(d.op); }
     if (d.dir) { setDir(d.dir); return drawBnpl(); }
     if (d.date) { dIso.value = d.date; dTxt.value = Q.auDate(d.date); return showDate(); }
     if (x.id === 't-cal') { try { dIso.showPicker(); } catch { dIso.focus(); } return; }
@@ -206,10 +211,9 @@ export function editTarget(c) {
 // ---- Can we afford this? ----
 export function openAfford() {
   const m = E.thisMonth(); let catId = (S.config.simple?.catIds || [])[0] || null;
-  const b = openSheet(`<h2>Can we afford this?</h2><label class="fld"><span>How much?</span><input class="amount-in" id="af-amt" inputmode="decimal" placeholder="0.00" autocomplete="off"></label><div class="fld"><span class="lbl">What's it for?</span><button class="btn ghost wide" id="af-cat">${esc(D.categoryLabel(catId) || 'Choose a category')}</button></div><div id="af-out" aria-live="polite"></div>`);
-  setTimeout(() => $('#af-amt', b).focus(), 250);
-  const answer = () => {
-    const cents = Math.abs(E.parseMoney($('#af-amt', b).value) || 0), out = $('#af-out', b);
+  const b = openSheet(`<h2>Can we afford this?</h2><label class="fld"><span>How much?</span><input class="amount-in" id="af-amt"></label><div class="fld"><span class="lbl">What's it for?</span><button class="btn ghost wide" id="af-cat">${esc(D.categoryLabel(catId) || 'Choose a category')}</button></div><div id="af-out" aria-live="polite"></div>`);
+  let afCents = 0; const answer = () => {
+    const cents = Math.abs(afCents), out = $('#af-out', b);
     if (!cents || !catId) { out.innerHTML = ''; return; }
     const st = D.catMonth(catId, m), left = st.available - cents, name = D.category(catId).name;
     let html;
@@ -222,7 +226,8 @@ export function openAfford() {
     if (g && g.perDay > 0 && cents >= big && localStorage.getItem('hb.cue.afford') !== 'false') { const days = Math.round(cents / g.perDay); html += `<p class="muted" style="margin-top:.5rem">${icon('house')} That's about ${days} day${days === 1 ? '' : 's'} of progress on ${esc(g.name.replace(/^our /i, 'our '))}.</p>`; }
     out.innerHTML = html;
   };
-  $('#af-amt', b).oninput = answer;
+  bindTill($('#af-amt', b), 0, c => { afCents = c; answer(); });
+  setTimeout(() => $('#af-amt', b).focus(), 250);
   $('#af-cat', b).onclick = () => pickCategory("What's it for?", id => { catId = id; $('#af-cat', b).textContent = D.categoryLabel(id); answer(); });
 }
 

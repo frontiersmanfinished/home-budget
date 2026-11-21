@@ -54,12 +54,12 @@ const file = path.join(os.tmpdir(), 'hb-sample-export.json'); fs.writeFileSync(f
   await a.click('#toast button'); await a.waitForTimeout(200); assert.equal(await avail(a, C.groc), '$380.00'); // undo
 
   // Split, then transfer (no budget effect), then assign.
-  await a.click('#fab'); await a.fill('#t-amt', '100'); await a.fill('#t-payee', 'New Shop'); await a.click('#t-split'); await a.fill('[data-split-amt="0"]', '60'); await a.fill('[data-split-amt="1"]', '40');
+  await a.click('#fab'); await a.fill('#t-amt', '100.00'); await a.fill('#t-payee', 'New Shop'); await a.click('#t-split'); await a.fill('[data-split-amt="0"]', '60'); await a.fill('[data-split-amt="1"]', '40');
   await a.click('[data-split-cat="0"]'); await a.fill('#pk-q', 'groc'); await a.click('.prow >> nth=0'); await a.waitForTimeout(250);
   await a.click('[data-split-cat="1"]'); await a.fill('#pk-q', 'kids'); await a.click('.prow >> nth=0'); await a.waitForTimeout(250);
   await a.click('#t-save'); await a.waitForTimeout(200);
   assert.equal(await avail(a, C.groc), '$320.00'); assert.equal(await avail(a, C.kids), '−$40.00');
-  await a.click('#fab'); await a.fill('#t-amt', '500'); await a.fill('#t-payee', 'savings'); await a.click('[data-xfer] >> nth=0'); await a.click('#t-save'); await a.waitForTimeout(200);
+  await a.click('#fab'); await a.fill('#t-amt', '500.00'); await a.fill('#t-payee', 'savings'); await a.click('[data-xfer] >> nth=0'); await a.click('#t-save'); await a.waitForTimeout(200);
   assert.equal(await rta(a), '$2,400.00');
   await a.click(`[data-cat="${C.kids}"]`); await a.fill('#c-asg', '40'); await a.click('#c-asg-save'); await a.waitForTimeout(200);
   assert.equal(await avail(a, C.kids), '$0.00'); assert.equal(await rta(a), '$2,360.00');
@@ -90,13 +90,13 @@ const file = path.join(os.tmpdir(), 'hb-sample-export.json'); fs.writeFileSync(f
   assert.equal(await a.inputValue('#reg-q'), 'is:unapproved ');
 
   // A date typed in part; Afterpay: start a plan, then the next payment links itself.
-  await a.click('#fab'); await a.fill('#t-amt', '25'); await a.fill('#t-payee', 'Afterpay'); await a.fill('#t-date-txt', '1'); await a.waitForTimeout(150);
+  await a.click('#fab'); await a.fill('#t-amt', '25.00'); await a.fill('#t-payee', 'Afterpay'); await a.fill('#t-date-txt', '1'); await a.waitForTimeout(150);
   assert.ok((await a.textContent('#t-date-show')).length > 0);
   await a.click('#t-bnpl-btn'); await a.fill('#bn-shop', 'Anaconda'); await a.fill('#bn-total', '100'); await a.click('#bn-cat'); await a.fill('#pk-q', 'fun'); await a.click('.prow >> nth=0'); await a.waitForTimeout(250);
   await a.click('#bn-start'); await a.waitForTimeout(250);
   assert.ok((await a.textContent('#t-bnpl')).includes('Anaconda (Afterpay 1 of 4)'));
   await a.screenshot({ path: SHOTS + '/bnpl.png' }); await a.click('#t-save'); await a.waitForTimeout(250);
-  await a.click('#fab'); await a.fill('#t-amt', '25'); await a.fill('#t-payee', 'Afterpay'); await a.click('#t-save'); await a.waitForTimeout(250);
+  await a.click('#fab'); await a.fill('#t-amt', '25.00'); await a.fill('#t-payee', 'Afterpay'); await a.click('#t-save'); await a.waitForTimeout(250);
   await a.click('[data-tab=accounts]'); await a.waitForTimeout(150); assert.ok((await a.textContent('[data-bnpl]')).includes('$50.00'));
   await a.click('[data-acct=__all]'); await a.fill('#reg-q', 'is:bnpl'); await a.waitForTimeout(250);
   assert.deepEqual((await a.locator('#reg-list .tx b').allTextContents()).sort(), ['Anaconda (Afterpay 1 of 4)', 'Anaconda (Afterpay 2 of 4)']);
@@ -109,6 +109,26 @@ const file = path.join(os.tmpdir(), 'hb-sample-export.json'); fs.writeFileSync(f
   await a.click('[data-start=template]'); await a.click('[data-src=basic]'); await a.waitForTimeout(300);
   await a.click('#af-add'); await a.fill('[data-i="0"][data-k="name"]', 'Everyday'); await a.click('#af-go'); await a.waitForTimeout(500);
   assert.equal(await rta(a), '$0.00'); assert.equal(await a.locator('.cat').count(), 17);
+
+  // A phone: the amount fills like a till, sums work, and the date opens the picker.
+  const ph = watch(await (await browser.newContext({ viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true, timezoneId: 'Australia/Adelaide', serviceWorkers: 'block' })).newPage());
+  await ph.goto(base); await ph.click('#signin'); await ph.waitForSelector('.v-welcome');
+  await ph.click('[data-start=template]'); await ph.click('[data-src=basic]'); await ph.waitForTimeout(300); await ph.click('#af-add'); await ph.fill('[data-i="0"][data-k="name"]', 'Everyday'); await ph.click('#af-go'); await ph.waitForTimeout(500);
+  await ph.tap('#fab'); await ph.waitForTimeout(400); await ph.tap('#t-amt'); await ph.keyboard.type('1250');
+  assert.equal(await ph.inputValue('#t-amt'), '12.50');
+  await ph.keyboard.press('Backspace'); assert.equal(await ph.inputValue('#t-amt'), '1.25');
+  await ph.keyboard.type('0'); await ph.tap('[data-op="+"]'); await ph.keyboard.type('4500');
+  assert.equal(await ph.inputValue('#t-amt'), '12.50 + 45.00'); assert.equal(await ph.textContent('#t-sum'), '= $57.50');
+  assert.equal(await ph.getAttribute('#t-date-txt', 'readonly'), ''); await ph.tap('#t-date-txt');
+  assert.equal(await ph.inputValue('#t-date'), new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Adelaide' }));
+  await ph.fill('#t-payee', 'Market'); await ph.tap('#t-save'); await ph.waitForTimeout(300);
+  await ph.tap('[data-tab=accounts]'); await ph.tap('[data-acct=__all]'); await ph.waitForTimeout(200);
+  assert.ok((await ph.textContent('#reg-list')).includes('−$57.50'));
+  // Editing: typing replaces the amount, backspace edits it.
+  await ph.tap('#reg-list .tx >> nth=0'); await ph.waitForTimeout(300); await ph.tap('#t-amt'); await ph.keyboard.type('9');
+  assert.equal(await ph.inputValue('#t-amt'), '0.09'); await ph.tap('.sheet [data-close]'); await ph.waitForTimeout(300);
+  await ph.tap('#reg-list .tx >> nth=0'); await ph.waitForTimeout(300); await ph.tap('#t-amt'); await ph.keyboard.press('Backspace');
+  assert.equal(await ph.inputValue('#t-amt'), '5.75');
   assert.deepEqual(errs, []);
   console.log('app tests passed');
   await browser.close(); srv.close();

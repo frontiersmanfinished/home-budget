@@ -6,7 +6,7 @@ This repo holds code only. Budget data lives in a private Firebase project, prot
 
 - **Set up:** see [SETUP.md](SETUP.md). Add `?local` to the address to try it on one phone without Firebase.
 - **Releases:** bump `VERSION` in `sw.js`. Phones show "An update is ready" and switch over when someone taps Reload.
-- **Tests:** `node tests/engine.test.mjs` (budget maths), `node tests/search.test.mjs` (search terms and dates), `node tests/upsync.test.mjs` and `node tests/sync-job.test.mjs` (Up sync), then `node tests/app.test.cjs` (needs Playwright and Chrome; runs two tabs on made-up data). Use `node tests/verify-ynab.mjs <export.json>` to check the maths against a real YNAB export kept outside the repo.
+- **Tests:** `node tests/engine.test.mjs` (budget maths), `node tests/search.test.mjs` (search terms and dates), `node tests/till.test.mjs` (amount entry), `node tests/upsync.test.mjs` and `node tests/sync-job.test.mjs` (Up sync), then `node tests/app.test.cjs` (needs Playwright and Chrome; runs two tabs on made-up data). Use `node tests/verify-ynab.mjs <export.json>` to check the maths against a real YNAB export kept outside the repo.
 
 ## How it's organised
 
@@ -15,6 +15,7 @@ This repo holds code only. Budget data lives in a private Firebase project, prot
 | `js/engine.js` | The budget maths: Ready to Assign, rollover, overspending, credit cards, targets, matching, reports. No screen and no database. |
 | `js/ynab.js` | Turns a YNAB API full export into the app's data. |
 | `js/search.js` | YNAB-style search terms and part-typed Australian dates. |
+| `js/till.js` | Amount entry like a till, with simple sums. |
 | `js/store.js` | Live data and every change: transactions, transfers, splits, assigning, reconciling, the activity log, imports. |
 | `js/backend.js` | The only file that talks to Firebase. `backend-local.js` is the same thing kept in one browser. |
 | `js/upsync.js` | Turns Up records from the sync inbox into transactions: held and settled, matching, transfers, round-ups, who spent. |
