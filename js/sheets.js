@@ -4,7 +4,7 @@ import * as E from './engine.js';
 import * as D from './store.js';
 import { S } from './store.js';
 import { $, $$, esc, icon, openSheet, closeSheet, toast, confirmBox, pickFrom } from './ui.js';
-import { V, goal, flagColour, upAccountFor } from './views.js';
+import { V, goal, flagColour, upAccountFor, ago } from './views.js';
 import * as Q from './search.js';
 import { bindTill } from './till.js';
 
@@ -237,15 +237,35 @@ export function openAfford() {
 // ---- Reconcile ----
 export function openReconcile(accountId) {
   const a = D.account(accountId), bal = D.balances()[accountId], upAcc = upAccountFor(accountId);
+  if (upAcc) return reconcileWithUp(a, bal, upAcc);
   const b = openSheet(`<h2>Reconcile ${esc(a.name)}</h2><p>Cleared balance here: <b>${money(bal.cleared)}</b></p><p class="muted">Does it match the bank? If not, enter the balance the bank shows${a.type === 'credit' ? ' (as a negative amount for money owed)' : ''}.</p>
     <div class="row end" style="margin-top:.4rem"><button class="btn primary" id="rc-yes">${icon('check')} Yes, it matches</button></div>
-    <label class="fld"><span>Bank's balance</span><input id="rc-bal" inputmode="decimal" placeholder="${esc((bal.cleared / 100).toFixed(2))}" value="${upAcc && upAcc.balance !== bal.cleared ? (upAcc.balance / 100).toFixed(2) : ''}"></label>${upAcc ? `<p class="muted f-sub">Filled in from Up at the last sync (${esc(E.fmt(upAcc.balance))}). Up's balance includes held transactions, which aren't cleared yet.</p>` : ''}
+    <label class="fld"><span>Bank's balance</span><input id="rc-bal" inputmode="decimal" placeholder="${esc((bal.cleared / 100).toFixed(2))}"></label>
     <div class="row end"><button class="btn ghost" id="rc-no">Use this balance</button></div>`);
   $('#rc-yes', b).onclick = () => { D.reconcile(accountId, bal.cleared); closeSheet(); toast('Reconciled and locked'); };
   $('#rc-no', b).onclick = () => {
     const v = E.parseMoney($('#rc-bal', b).value); if (v === null) return toast('Enter the bank balance');
     const diff = v - bal.cleared; if (!diff) { D.reconcile(accountId, v); closeSheet(); return toast('Reconciled and locked'); }
     confirmBox('Add an adjustment?', `The bank is ${E.fmt(Math.abs(diff))} ${diff > 0 ? 'higher' : 'lower'}. Check for missing or uncleared transactions first. Adjust and lock anyway?`, 'Adjust and lock', () => { D.reconcile(accountId, v); closeSheet(); toast('Reconciled with an adjustment'); }, false);
+  };
+}
+// Up shows one balance, including held transactions, and no cleared balance, so the whole balance is compared.
+function reconcileWithUp(a, bal, upAcc) {
+  const diff = upAcc.balance - bal.working, when = S.syncState?.lastOk ? ago(S.syncState.lastOk) : 'at the last sync';
+  const done = msg => { closeSheet(); toast(msg); };
+  const b = openSheet(`<h2>Reconcile ${esc(a.name)}</h2>
+    <p class="muted">Up shows one balance that includes held transactions, so the whole balance here is compared with it.</p>
+    <div class="kv"><span>Here, including held</span><b>${money(bal.working)}</b><span>Up, synced ${esc(when)}</span><b>${money(upAcc.balance)}</b></div>
+    ${diff === 0 ? `<div class="banner info">${icon('circle-check')}<span>They match. Reconciling locks the settled transactions; held ones stay open until they settle.</span></div>
+      <div class="row end"><button class="btn primary" id="rc-yes">${icon('check')} Reconcile</button></div>`
+    : `<div class="banner">${icon('triangle-alert')}<span>${money(Math.abs(diff))} ${diff > 0 ? 'more in Up' : 'less in Up'}. Spending since the last sync, or something entered here that Up hasn't seen yet, can explain it. Sync, or check the Up app, before adjusting.</span></div>`}
+    <label class="fld"><span>Balance in the Up app now</span><input id="rc-bal" inputmode="decimal" value="${(upAcc.balance / 100).toFixed(2)}"></label>
+    <div class="row end"><button class="btn ghost" id="rc-no">Use this balance</button></div>`);
+  $('#rc-yes', b) && ($('#rc-yes', b).onclick = () => { D.reconcile(a.id, upAcc.balance, { whole: true }); done('Reconciled. Held transactions stay open until they settle'); });
+  $('#rc-no', b).onclick = () => {
+    const v = E.parseMoney($('#rc-bal', b).value); if (v === null) return toast('Enter the balance from the Up app');
+    const d = v - bal.working; if (!d) { D.reconcile(a.id, v, { whole: true }); return done('Reconciled. Held transactions stay open until they settle'); }
+    confirmBox('Add an adjustment?', `Up is ${E.fmt(Math.abs(d))} ${d > 0 ? 'higher' : 'lower'} than the balance here, including held transactions. Adjust and lock anyway?`, 'Adjust and lock', () => { D.reconcile(a.id, v, { whole: true }); done('Reconciled with an adjustment'); }, false);
   };
 }
 export function editAccount(id) {

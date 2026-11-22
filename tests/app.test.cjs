@@ -113,6 +113,13 @@ const file = path.join(os.tmpdir(), 'hb-sample-export.json'); fs.writeFileSync(f
   await a.selectOption('[data-up-choice="UPX"]', A.chq); await a.fill('[data-up-from="UPX"]', m0 + '-01'); await a.click('[data-up-save="UPX"]'); await a.waitForTimeout(1200);
   await a.click('[data-tab=accounts]'); await a.click('[data-acct=__all]'); await a.fill('#reg-q', 'payee:"corner bakery"'); await a.waitForTimeout(300);
   assert.equal(await a.locator('#reg-list .tx').count(), 1, 'the Up record came in after linking');
+  // Reconciling a linked account compares the whole balance with Up's (Up shows no cleared balance).
+  await a.click('[data-tab=accounts]'); await a.click(`[data-acct="${A.chq}"]`); await a.click('[data-reconcile]'); await a.waitForTimeout(200);
+  assert.ok((await a.textContent('.sheet')).includes('Here, including held'), 'Up reconcile shows the whole balance');
+  assert.equal(await a.locator('#rc-yes').count(), 0, 'no one-tap reconcile when Up differs');
+  assert.equal(await a.inputValue('#rc-bal'), '0.00', "Up's balance is filled in");
+  await a.click('#rc-no'); await a.waitForTimeout(200); assert.ok((await a.textContent('body')).includes('than the balance here, including held'));
+  for (let i = 0; i < 3 && await a.locator('.sheet-wrap.open').count(); i++) { await a.evaluate(() => [...document.querySelectorAll('.sheet-wrap.open .sheet-bg')].pop().click()); await a.waitForTimeout(400); }
   // Complete reset (backup first, type RESET), then start again with basic categories.
   await a.click('#menu'); await a.click('[data-m=settings]'); await a.click('[data-reset]'); assert.ok(await a.isDisabled('#rs-go'));
   await a.fill('#rs-word', 'RESET'); const [dl] = await Promise.all([a.waitForEvent('download'), a.click('#rs-go')]); assert.ok(dl.suggestedFilename().startsWith('home-budget-before-reset'));

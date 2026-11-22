@@ -248,8 +248,10 @@ export const approve = ids => bulkEdit(ids, { approved: true }, `Approved ${ids.
 export function setCleared(id) { const t = txn(id); if (!t || t.cleared === 'r') return; return bulkEdit([id], { cleared: t.cleared === 'c' ? 'u' : 'c' }, `Marked ${payeeName(t.payeeId)} ${t.cleared === 'c' ? 'uncleared' : 'cleared'}`); }
 
 /** Reconcile: lock cleared transactions; add an adjustment if the bank balance differs. */
-export function reconcile(accountId, bankBalance) {
-  const b = balances()[accountId], diff = bankBalance - b.cleared, ops = [], day = E.today(), now = Date.now();
+/** Reconcile: lock settled transactions; add an adjustment if the bank's figure differs.
+ *  whole: compare the working balance (Up shows one balance, including held transactions), not the cleared one. */
+export function reconcile(accountId, bankBalance, { whole = false } = {}) {
+  const b = balances()[accountId], diff = bankBalance - (whole ? b.working : b.cleared), ops = [], day = E.today(), now = Date.now();
   if (diff) { const ops2 = []; const pid = payeeFor('Reconciliation Balance Adjustment', ops2); write(ops2); ops.push(...placeOps({ id: uid(), date: day, amount: diff, accountId, payeeId: pid, categoryId: account(accountId)?.onBudget ? E.RTA : null, memo: 'Entered automatically by reconciling', cleared: 'r', createdAt: now, createdBy: me().name, source: 'reconcile' }, undefined)); }
   for (const t of txns()) if (t.accountId === accountId && t.cleared === 'c') ops.push(...placeOps({ ...t, cleared: 'r' }));
   ops.push({ type: 'update', col: 'accounts', id: accountId, data: { reconciledAt: new Date().toISOString(), reconciledBalance: bankBalance } });
