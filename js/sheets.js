@@ -67,8 +67,11 @@ export function openTxn(id, preset = {}) {
     }
     if (splits) {
       const total = signed(), used = E.sum(splits, s => s.amount), left = total - used;
-      box.innerHTML = `<div class="fld"><span class="lbl">Split</span>${splits.map((s, i) => `<div class="splitrow"><button class="btn ghost" data-split-cat="${i}">${esc(D.categoryLabel(s.categoryId) || 'Category')}</button><input inputmode="decimal" data-split-amt="${i}" value="${amountText(s.amount)}" placeholder="0.00"><button class="x" data-split-del="${i}" aria-label="Remove">${icon('x')}</button></div>`).join('')}
+      box.innerHTML = `<div class="fld"><span class="lbl">Split</span>${splits.map((s, i) => `<div class="splitrow"><button class="btn ghost" data-split-cat="${i}">${esc(D.categoryLabel(s.categoryId) || 'Category')}</button><input class="split-amt" data-split-amt="${i}" aria-label="Amount for this line"><button class="x" data-split-del="${i}" aria-label="Remove">${icon('x')}</button><input class="split-memo" data-split-memo="${i}" value="${esc(s.memo || '')}" placeholder="Memo for this line" autocomplete="off" aria-label="Memo for this line"></div>`).join('')}
         <div class="row" style="margin-top:.5rem"><button class="btn ghost" id="t-split-add">${icon('plus')} Add line</button><span class="grow"></span><small class="${left ? 'needs' : 'muted'}">${left ? `${money(Math.abs(left))} left to split` : 'All split'}</small></div><button class="btn ghost" id="t-unsplit" style="margin-top:.3rem">Don't split</button></div>`;
+      // Each line takes amounts like the main one: 1, 2, 5, 0 is 12.50.
+      $$('[data-split-memo]', box).forEach(el => { el.oninput = () => { splits[+el.dataset.splitMemo].memo = el.value; }; });
+      $$('[data-split-amt]', box).forEach(el => { const i = +el.dataset.splitAmt; bindTill(el, Math.abs(splits[i].amount || 0), c => { splits[i].amount = inflow ? c : -c; showLeft(); }); });
       return;
     }
     box.innerHTML = `<div class="fld"><span class="lbl">Category</span><div class="row in"><button class="btn ghost grow" id="t-cat" style="justify-content:flex-start">${esc(D.categoryLabel(t.categoryId) || 'Choose a category')}</button><button class="btn ghost" id="t-split" aria-label="Split">${icon('split')}</button></div></div>`;
@@ -105,7 +108,7 @@ export function openTxn(id, preset = {}) {
   };
   payee.oninput = () => { t.payeeId = null; if (t.transferAccountId) { t.transferAccountId = null; drawCat(); } drawAc(); drawBnpl(); };
   payee.onblur = () => setTimeout(() => { ac.hidden = true; }, 150);
-  b.addEventListener('input', e => { const i = e.target.dataset.splitAmt; if (i !== undefined) { const v = Math.abs(E.parseMoney(e.target.value) || 0); splits[i].amount = inflow ? v : -v; const left = signed() - E.sum(splits, s => s.amount); const sm = $('#t-catbox small', b); if (sm) { sm.textContent = left ? `${E.fmt(Math.abs(left))} left to split` : 'All split'; sm.className = left ? 'needs' : 'muted'; } } });
+  function showLeft() { const left = signed() - E.sum(splits || [], x => x.amount), sm = $('#t-catbox small', b); if (sm) { sm.textContent = left ? `${E.fmt(Math.abs(left))} left to split` : 'All split'; sm.className = left ? 'needs' : 'muted'; } }
   $('#t-acct', b).onchange = () => { t.accountId = $('#t-acct', b).value; drawCat(); };
   b.addEventListener('click', e => {
     const x = e.target.closest('button'); if (!x) return; const d = x.dataset;

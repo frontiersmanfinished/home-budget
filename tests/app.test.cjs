@@ -54,7 +54,7 @@ const file = path.join(os.tmpdir(), 'hb-sample-export.json'); fs.writeFileSync(f
   await a.click('#toast button'); await a.waitForTimeout(200); assert.equal(await avail(a, C.groc), '$380.00'); // undo
 
   // Split, then transfer (no budget effect), then assign.
-  await a.click('#fab'); await a.fill('#t-amt', '100.00'); await a.fill('#t-payee', 'New Shop'); await a.click('#t-split'); await a.fill('[data-split-amt="0"]', '60'); await a.fill('[data-split-amt="1"]', '40');
+  await a.click('#fab'); await a.fill('#t-amt', '100.00'); await a.fill('#t-payee', 'New Shop'); await a.click('#t-split'); await a.fill('[data-split-amt="0"]', '60.00'); await a.fill('[data-split-amt="1"]', '40.00');
   await a.click('[data-split-cat="0"]'); await a.fill('#pk-q', 'groc'); await a.click('.prow >> nth=0'); await a.waitForTimeout(250);
   await a.click('[data-split-cat="1"]'); await a.fill('#pk-q', 'kids'); await a.click('.prow >> nth=0'); await a.waitForTimeout(250);
   await a.click('#t-save'); await a.waitForTimeout(200);
@@ -140,6 +140,22 @@ const file = path.join(os.tmpdir(), 'hb-sample-export.json'); fs.writeFileSync(f
   assert.equal(await ph.inputValue('#t-amt'), '0.09'); await ph.tap('.sheet [data-close]'); await ph.waitForTimeout(300);
   await ph.tap('#reg-list .tx >> nth=0'); await ph.waitForTimeout(300); await ph.tap('#t-amt'); await ph.keyboard.press('Backspace');
   assert.equal(await ph.inputValue('#t-amt'), '5.75');
+  // Split lines take amounts the same way.
+  await ph.tap('.sheet [data-close]'); await ph.waitForTimeout(300); await ph.tap('#fab'); await ph.waitForTimeout(400);
+  await ph.tap('#t-amt'); await ph.keyboard.type('10000'); await ph.tap('#t-split'); await ph.waitForTimeout(150);
+  await ph.tap('[data-split-amt="0"]'); await ph.keyboard.type('6000'); assert.equal(await ph.inputValue('[data-split-amt="0"]'), '60.00');
+  assert.equal((await ph.textContent('#t-catbox small')).trim(), '$40.00 left to split');
+  await ph.tap('[data-split-amt="1"]'); await ph.keyboard.press('Backspace'); await ph.keyboard.press('Backspace'); await ph.keyboard.press('Backspace'); await ph.keyboard.press('Backspace'); await ph.keyboard.press('Backspace'); await ph.keyboard.type('4000');
+  assert.equal(await ph.inputValue('[data-split-amt="1"]'), '40.00'); assert.equal((await ph.textContent('#t-catbox small')).trim(), 'All split');
+  // Each line keeps its own memo.
+  await ph.fill('[data-split-memo="0"]', 'school shoes'); await ph.fill('[data-split-memo="1"]', 'birthday present');
+  await ph.tap('[data-split-cat="0"]'); await ph.fill('#pk-q', 'kids'); await ph.tap('.prow >> nth=0'); await ph.waitForTimeout(250);
+  assert.equal(await ph.inputValue('[data-split-memo="0"]'), 'school shoes');
+  await ph.tap('[data-split-cat="1"]'); await ph.fill('#pk-q', 'gifts'); await ph.tap('.prow >> nth=0'); await ph.waitForTimeout(250);
+  await ph.fill('#t-payee', 'Big W'); await ph.tap('#t-save'); await ph.waitForTimeout(300);
+  await ph.tap('[data-tab=accounts]'); await ph.tap('[data-acct=__all]'); await ph.fill('#reg-q', 'memo:"school shoes"'); await ph.waitForTimeout(300);
+  assert.equal(await ph.locator('#reg-list .tx').count(), 1); await ph.tap('#reg-list .tx >> nth=0'); await ph.waitForTimeout(300);
+  assert.equal(await ph.inputValue('[data-split-memo="1"]'), 'birthday present'); assert.equal(await ph.inputValue('[data-split-amt="0"]'), '60.00');
   assert.deepEqual(errs, []);
   console.log('app tests passed');
   await browser.close(); srv.close();
