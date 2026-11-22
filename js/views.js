@@ -51,7 +51,11 @@ export function viewHome() {
 function catRow(c, m) {
   const st = D.catMonth(c.id, m), t = E.targetFor(c, m, st);
   const cls = st.available < 0 ? (st.creditOver && !st.cashOver ? 'credit' : 'neg') : st.available === 0 ? 'zero' : '';
-  const sub = st.available < 0 ? `<small class="over">${st.creditOver && !st.cashOver ? 'Card spending not covered' : `Overspent: move ${esc(E.fmt(-st.available))} to cover it?`}</small>`
+  // A finished month's overspending was already dealt with: bank overspending came out of the next month's
+  // Ready to Assign, and uncovered card spending became card debt. Say so rather than asking to cover it.
+  const next = E.monthName(E.addMonths(m, 1), false).split(' ')[0];
+  const sub = st.available < 0 && m < E.thisMonth() ? `<small class="muted">${[st.cashOver ? `${esc(E.fmt(st.cashOver))} overspent, taken from ${esc(next)}'s Ready to Assign` : '', st.creditOver ? `${esc(E.fmt(st.creditOver))} card spending added to the card debt` : ''].filter(Boolean).join('; ') || `${esc(E.fmt(-st.available))} overspent, settled in ${esc(next)}`}</small>`
+    : st.available < 0 ? `<small class="over">${st.creditOver && !st.cashOver ? 'Card spending not covered' : `Overspent: move ${esc(E.fmt(-st.available))} to cover it?`}</small>`
     : t && t.under > 0 ? `<small class="needs">${esc(E.fmt(t.under))} more needed this month</small>`
     : `<small class="muted">Assigned ${esc(E.fmt(st.assigned))}</small>`;
   return `<button class="cat" data-cat="${esc(c.id)}"><span class="txt"><b>${esc(c.name)}</b>${sub}${t ? `<span class="bar${t.pct < 1 ? ' part' : ''}"><i style="width:${(t.pct * 100).toFixed(0)}%"></i></span>` : ''}</span><span class="pillv ${cls}">${money(st.available)}</span></button>`;
