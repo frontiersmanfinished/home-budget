@@ -53,7 +53,7 @@ export function openTxn(id, preset = {}) {
     <label class="fld"><span>Memo</span><input id="t-memo" value="${esc(t.memo || '')}" placeholder="Optional note" autocomplete="off"></label>
     <div class="fld"><span class="lbl">Flags</span><div class="pills wrap" id="t-flags">${D.flags().map(f => `<button class="pill${(t.flags || []).includes(f.id) ? ' on' : ''}" data-flag="${esc(f.id)}"><i class="fdot" style="background:${esc(flagColour(f.color))}"></i>${esc(f.name)}</button>`).join('')}</div></div>
     ${was ? `<p class="muted f-sub">${esc([was.createdBy && `Added by ${was.createdBy}`, was.updatedBy && was.updatedAt && `changed by ${was.updatedBy} ${new Date(was.updatedAt).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })}`, was.who && `spent by ${was.who}`, was.time && `bank time ${was.time}`, was.importPayee && `bank name: ${was.importPayee}`, was.upStatus === 'HELD' && 'held by Up, not settled yet', was.upStatus === 'GONE' && 'Up no longer shows this hold: it may have been released'].filter(Boolean).join(', '))}</p>` : ''}
-    <div class="row end sticky">${was ? `<button class="btn danger" id="t-del">${icon('trash-2')} Delete</button><span class="grow"></span>` : ''}${was?.approved === false ? `<button class="btn ghost" id="t-approve">Approve</button>` : ''}<button class="btn primary" id="t-save">Save</button></div>`);
+    <div class="row end sticky">${was ? `<button class="btn danger" id="t-del">${icon('trash-2')} Delete</button><span class="grow"></span>` : ''}${was?.approved === false ? `<button class="btn ghost" id="t-save">Save for later</button><button class="btn primary" id="t-approve">${icon('check')} Approve</button>` : `<button class="btn primary" id="t-save">Save</button>`}</div>`);
   const amt = $('#t-amt', b), payee = $('#t-payee', b), ac = $('#t-ac', b);
   const setDir = d => { inflow = d === 'in'; $$('#t-dir button', b).forEach(x => x.classList.toggle('on', x.dataset.dir === d)); drawCat(); };
   const tl = bindTill(amt, Math.abs(t.amount || 0), (c, isSum) => { $('#t-sum', b).textContent = isSum ? `= ${E.fmt(Math.abs(c))}` : ''; if (splits) drawCat(); });
@@ -127,23 +127,23 @@ export function openTxn(id, preset = {}) {
     if (d.splitDel !== undefined) { splits.splice(+d.splitDel, 1); return drawCat(); }
     if (d.splitCat !== undefined) return pickCategory('Category', id => { splits[+d.splitCat].categoryId = id; drawCat(); }, { rta: true });
     if (x.id === 't-del') { closeSheet(); const undo = D.deleteTxns([was.id]); return toast('Deleted', { label: 'Undo', run: undo }); }
-    if (x.id === 't-approve') { D.approve([was.id]); closeSheet(); return toast('Approved'); }
+    if (x.id === 't-approve') return save(true); // keeps the edits and approves
     if (x.id === 't-save') return save();
   });
-  function save() {
+  function save(approve = false) {
     const amount = signed();
     if (!amount && !splits) return toast('Enter an amount');
     if (!$('#t-acct', b).value) return toast('Choose an account');
     if (splits) { const left = amount - E.sum(splits, s => s.amount); if (left) return toast(`${E.fmt(Math.abs(left))} still to split`); if (splits.some(s => s.categoryId === undefined)) return toast('Choose a category for each line'); }
     if (t.transferAccountId === $('#t-acct', b).value) return toast('Pick a different account to transfer to');
     if (!dIso.value) return toast('Check the date: try 19 or 19/10');
-    const out = { ...t, amount, accountId: $('#t-acct', b).value, date: dIso.value, memo: $('#t-memo', b).value.trim(), splits, cleared: locked ? 'r' : $('#t-clr', b).checked ? (t.cleared === 'r' ? 'r' : 'c') : 'u', approved: was?.approved === false ? false : true };
+    const out = { ...t, amount, accountId: $('#t-acct', b).value, date: dIso.value, memo: $('#t-memo', b).value.trim(), splits, cleared: locked ? 'r' : $('#t-clr', b).checked ? (t.cleared === 'r' ? 'r' : 'c') : 'u', approved: approve || was?.approved !== false };
     if (!out.transferAccountId && !out.payeeId && payee.value.trim()) out.payeeText = payee.value.trim();
     const go = () => {
       localStorage.setItem('hb.lastAcct', out.accountId);
       const { payeeText: ptxt, ...rest } = out;
       const undo = ptxt ? D.addWithPayee(rest, ptxt) : D.saveTxn(rest);
-      closeSheet(); toast(was ? 'Saved' : 'Added', { label: 'Undo', run: undo });
+      closeSheet(); toast(approve ? 'Saved and approved' : was ? 'Saved' : 'Added', { label: 'Undo', run: undo });
     };
     if (locked && (amount !== was.amount || out.accountId !== was.accountId)) return confirmBox('Change a reconciled transaction?', 'This changes a balance that has been checked against the bank.', 'Change it', go);
     go();

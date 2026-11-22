@@ -120,6 +120,12 @@ const file = path.join(os.tmpdir(), 'hb-sample-export.json'); fs.writeFileSync(f
   assert.equal(await a.inputValue('#rc-bal'), '0.00', "Up's balance is filled in");
   await a.click('#rc-no'); await a.waitForTimeout(200); assert.ok((await a.textContent('body')).includes('than the balance here, including held'));
   for (let i = 0; i < 3 && await a.locator('.sheet-wrap.open').count(); i++) { await a.evaluate(() => [...document.querySelectorAll('.sheet-wrap.open .sheet-bg')].pop().click()); await a.waitForTimeout(400); }
+  // Approving from the editor keeps the edits made there.
+  await a.click('[data-tab=accounts]'); await a.click('[data-acct=__all]'); await a.fill('#reg-q', 'payee:"corner bakery"'); await a.waitForTimeout(300);
+  await a.click('#reg-list .tx >> nth=0'); assert.equal(await a.locator('#t-approve').count(), 1, 'an imported transaction waits for approval');
+  await a.fill('#t-memo', 'birthday cake'); await a.click('#t-approve'); await a.waitForTimeout(300);
+  await a.click('#reg-list .tx >> nth=0'); assert.equal(await a.inputValue('#t-memo'), 'birthday cake', 'the memo was kept'); assert.equal(await a.locator('#t-approve').count(), 0, 'and it is approved');
+  await a.click('.sheet [data-close] >> nth=0'); await a.waitForTimeout(300);
   // Complete reset (backup first, type RESET), then start again with basic categories.
   await a.click('#menu'); await a.click('[data-m=settings]'); await a.click('[data-reset]'); assert.ok(await a.isDisabled('#rs-go'));
   await a.fill('#rs-word', 'RESET'); const [dl] = await Promise.all([a.waitForEvent('download'), a.click('#rs-go')]); assert.ok(dl.suggestedFilename().startsWith('home-budget-before-reset'));
