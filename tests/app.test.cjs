@@ -164,7 +164,10 @@ const file = path.join(os.tmpdir(), 'hb-sample-export.json'); fs.writeFileSync(f
   await ph.fill('[data-split-memo="0"]', 'school shoes'); await ph.fill('[data-split-memo="1"]', 'birthday present');
   await ph.tap('[data-split-cat="0"]'); await ph.fill('#pk-q', 'kids'); await ph.tap('.prow >> nth=0'); await ph.waitForTimeout(250);
   assert.equal(await ph.inputValue('[data-split-memo="0"]'), 'school shoes');
-  await ph.tap('[data-split-cat="1"]'); await ph.fill('#pk-q', 'gifts'); await ph.tap('.prow >> nth=0'); await ph.waitForTimeout(250);
+  // With the keyboard up (the page shrinks), the matching categories stay above it, and Enter picks the first.
+  await ph.tap('[data-split-cat="1"]'); await ph.waitForTimeout(300); await ph.setViewportSize({ width: 412, height: 520 }); await ph.fill('#pk-q', 'gifts'); await ph.waitForTimeout(300);
+  const row = await ph.locator('.prow >> nth=0').boundingBox(); assert.ok(row && row.y + row.height <= 520, 'the first match is above the keyboard');
+  await ph.press('#pk-q', 'Enter'); await ph.waitForTimeout(300); await ph.setViewportSize({ width: 412, height: 915 }); await ph.waitForTimeout(200);
   await ph.fill('#t-payee', 'Big W'); await ph.tap('#t-save'); await ph.waitForTimeout(300);
   await ph.tap('[data-tab=accounts]'); await ph.tap('[data-acct=__all]'); await ph.fill('#reg-q', 'memo:"school shoes"'); await ph.waitForTimeout(300);
   assert.equal(await ph.locator('#reg-list .tx').count(), 1); await ph.tap('#reg-list .tx >> nth=0'); await ph.waitForTimeout(300);

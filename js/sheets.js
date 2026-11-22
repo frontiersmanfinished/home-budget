@@ -26,8 +26,11 @@ export function pickCategory(title, onPick, { rta = false, m = E.thisMonth(), no
     }
     $('#pk-list', b).innerHTML = html || '<p class="muted pad">No matching category.</p>';
   };
+  b.closest('.sheet').classList.add('picker');
   draw('');
   $('#pk-q', b).oninput = e => draw(e.target.value);
+  // The keyboard's search/enter key picks the first match.
+  $('#pk-q', b).onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); $('#pk-list .prow', b)?.click(); } };
   b.addEventListener('click', e => { const r = e.target.closest('.prow'); if (r) { closeSheet(); setTimeout(() => onPick(r.dataset.id || null), 10); } });
 }
 

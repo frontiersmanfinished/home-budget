@@ -24,6 +24,12 @@ export function openSheet(html, onClose) {
   requestAnimationFrame(() => el.classList.add('open'));
   return $('.sheet-body', el);
 }
+// Keep sheets above the on-screen keyboard. Chrome shrinks the page itself (interactive-widget in index.html);
+// where a browser doesn't, the keyboard's height is measured and the sheets are lifted by it.
+if (window.visualViewport) {
+  const vv = visualViewport, lift = () => document.documentElement.style.setProperty('--kb', `${Math.max(0, Math.round(innerHeight - vv.height - vv.offsetTop))}px`);
+  vv.addEventListener('resize', lift); vv.addEventListener('scroll', lift); lift();
+}
 export const closeSheet = () => { if (stack.length) history.back(); };
 export const sheetOpen = () => stack.length > 0;
 addEventListener('popstate', () => {
