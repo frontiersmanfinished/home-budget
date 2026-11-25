@@ -20,7 +20,8 @@ const srv = http.createServer(async (q, r) => {
     if (p === '/accounts') return send(200, { data: up.accounts, links: { next: null } });
     if (p === '/webhooks') return send(200, { data: up.hooks, links: { next: null } });
     const m = p.match(/^\/accounts\/(\w+)\/transactions$/);
-    if (m) { const held = u.searchParams.get('filter[status]') === 'HELD'; const all = held ? up.txns.filter(t => t.attributes.status === 'HELD') : up.txns; const page = +(u.searchParams.get('page[after]') || 0); const next = page + 100 < all.length ? `http://localhost:${srv.address().port}/up${p}?page[after]=${page + 100}` : null; return send(200, { data: all.slice(page, page + 100), links: { next } }); }
+    if (m) { const held = u.searchParams.get('filter[status]') === 'HELD'; const all = (held ? up.txns.filter(t => t.attributes.status === 'HELD') : up.txns).filter(t => !up.hidden?.includes(t.id)); const page = +(u.searchParams.get('page[after]') || 0); const next = page + 100 < all.length ? `http://localhost:${srv.address().port}/up${p}?page[after]=${page + 100}` : null; return send(200, { data: all.slice(page, page + 100), links: { next } }); }
+    const one = p.match(/^\/transactions\/(\w+)$/); if (one) { const t = up.txns.find(x => x.id === one[1]); return t ? send(200, { data: t }) : send(404, {}); }
     return send(404, {});
   }
   if (q.headers.authorization !== 'Bearer ID') return send(403, {});
@@ -56,6 +57,11 @@ db[`${ROOT}/sync/settings`] = toFs({ requestNow: now + 2 * 3600e3, everyHours: 6
 up.txns[0].attributes.status = 'SETTLED'; up.txns[0].attributes.amount.valueInBaseUnits = -150;
 await run(now + 2.5 * 3600e3); st = data('sync/state');
 assert.equal(st.added, 0); assert.equal(st.changed, 1); assert.deepEqual(st.heldIds, ['T1', 'T2']); assert.equal(data('upInbox/T0').amt, -150);
+// Up's lists leave out a hold that still exists: looked up on its own, it stays held. A released hold (404) is marked.
+up.hidden = ['T1']; up.txns.splice(2, 1);
+db[`${ROOT}/sync/settings`] = toFs({ requestNow: now + 3 * 3600e3, everyHours: 6 }).mapValue.fields;
+await run(now + 3.5 * 3600e3); st = data('sync/state');
+assert.deepEqual(st.heldIds, ['T1']); assert.equal(data('upInbox/T1').status, 'HELD'); assert.equal(data('upInbox/T2').status, 'RELEASED');
 // Paused: nothing fetched.
 db[`${ROOT}/sync/settings`] = toFs({ paused: true }).mapValue.fields;
 const c2 = upCalls; await run(now + 20 * 3600e3); assert.equal(upCalls, c2);

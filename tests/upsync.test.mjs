@@ -52,8 +52,11 @@ const ru = p.creates.find(x => x.upId === 'Q-ru'), sav = p.creates.find(x => x.u
 assert.equal(ru.amount, -45); assert.equal(ru.transferAccountId, 'saver'); assert.equal(sav.transferAccountId, 'spend'); assert.equal(sav.transferId, ru.id);
 // Buy now, pay later instalments link themselves.
 t = plan([it({ upId: 'BN', desc: 'Afterpay', amt: -2500 })]).creates[0]; assert.deepEqual(t.bnpl, { planId: 'P', n: 2 }); assert.equal(t.categoryId, 'fun');
-// A hold the bank dropped goes back for checking.
-p = plan([], [{ id: 'up-G', upId: 'G', upStatus: 'HELD', accountId: 'spend', amount: -900, date: '2026-11-17', approved: true }], []);
+// A hold missing from the held list stays as it is (and stays approved); only Up's confirmation marks it released.
+const G = { id: 'up-G', upId: 'G', upStatus: 'HELD', accountId: 'spend', amount: -900, date: '2026-11-17', cleared: 'u', approved: true };
+assert.equal(plan([it({ upId: 'G', status: 'HELD', amt: -900, created: '2026-11-17T10:00:00+10:30' })], [{ ...G }], []).updates.length, 0, 'not unapproved when the held list misses it');
+p = plan([it({ upId: 'G', status: 'RELEASED', amt: -900, created: '2026-11-17T10:00:00+10:30' })], [{ ...G }], []);
 assert.deepEqual(p.updates[0].fields, { upStatus: 'GONE', approved: false });
-assert.equal(plan([], [{ id: 'up-G', upId: 'G', upStatus: 'HELD', accountId: 'spend', amount: -900, date: '2026-11-17' }], ['G']).updates.length, 0);
+assert.equal(plan([it({ upId: 'G', status: 'RELEASED', amt: -900, created: '2026-11-17T10:00:00+10:30' })], [{ ...G, upStatus: 'GONE' }], []).updates.length, 0, 'flagged once: approving it again sticks');
+assert.equal(plan([it({ upId: 'R', status: 'RELEASED', amt: -900 })]).creates.length, 0, 'a released hold never seen here is not added');
 console.log('up sync tests passed');

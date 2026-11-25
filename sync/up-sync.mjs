@@ -67,10 +67,11 @@ async function commit(writes) {
 }
 
 // ---- Up ----
-async function up(path) {
+async function up(path, { missingOk = false } = {}) {
   for (let attempt = 0; ; attempt++) {
     const r = await fetch(path.startsWith('http') ? path : `${process.env.UP_URL || UP}${path}`, { headers: { authorization: `Bearer ${env('UP_TOKEN')}` } });
     if (r.status === 429 && attempt < 4) { await new Promise(res => setTimeout(res, 2000 * 2 ** attempt)); continue; }
+    if (r.status === 404 && missingOk) return null;
     if (r.status === 401) throw new Error('Up refused the token (HTTP 401). It may have been revoked or replaced: update the UP_TOKEN secret.');
     if (!r.ok) throw new Error(`Up request failed (HTTP ${r.status}) for ${path.split('?')[0].replace(/[0-9a-f-]{36}/g, '…')}`);
     return r.json();
@@ -141,6 +142,16 @@ export async function run(now = Date.now()) {
         }
         // Holds older than the window are still needed to spot holds the bank released.
         for (const t of await upAll(`/accounts/${a.id}/transactions?filter[status]=HELD&page[size]=100`)) if (!held.includes(t.id)) held.push(t.id);
+      }
+      // A hold the lists didn't show is looked up on its own: gone (404) means the shop released it; anything else
+      // is its current state. Only a definite answer from Up marks a hold released, so a patchy list changes nothing.
+      const seen = new Set(writes.map(w => w.set[1]));
+      for (const was of existing.values()) {
+        if (was.status !== 'HELD' || held.includes(was.id) || seen.has(was.id)) continue;
+        const j = await up(`/transactions/${was.id}`, { missingOk: true }), { id, ...w } = was;
+        if (!j) { writes.push({ set: ['upInbox', id, { ...w, status: 'RELEASED' }] }); changed++; continue; }
+        const rec = inboxRecord(j.data, was.acct); if (rec.status === 'HELD') held.push(id);
+        if (!same(Object.keys(rec).map(k => w[k] ?? null), Object.keys(rec).map(k => rec[k]))) { writes.push({ set: ['upInbox', id, rec] }); changed++; }
       }
       const cutoff = new Date(now - INBOX_DAYS * DAY).toISOString();
       for (const d of existing.values()) if (d.created && d.created < cutoff) writes.push({ del: ['upInbox', d.id] });

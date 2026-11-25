@@ -32,6 +32,10 @@ export function planSync({ items, txns, links, heldIds = null, ctx }) {
     const { date, time } = E.localDateTime(it.created); if ((link.from && date < link.from) || (link.fromAt && Date.parse(it.created) < link.fromAt)) continue;
     const accountId = link.accountId, cleared = it.status === 'SETTLED' ? 'c' : 'u';
     let t = byUp.get(it.upId);
+    if (it.status === 'RELEASED') { // Up confirmed the shop released this hold: flag it once for checking.
+      if (t && !t.deletedAt && t.upStatus !== 'GONE') update(t, { upStatus: 'GONE', approved: false });
+      continue;
+    }
     if (t) { // Already here: settle, adjust the amount, never undo a reconcile.
       if (t.deletedAt) continue;
       const f = { upStatus: it.status, cleared: t.cleared === 'r' ? 'r' : cleared };
@@ -40,7 +44,7 @@ export function planSync({ items, txns, links, heldIds = null, ctx }) {
     }
     // A hold that settled under a new id.
     if (it.status === 'SETTLED') {
-      t = work.find(x => x.upStatus === 'HELD' && x.accountId === accountId && !x.deletedAt && !held.has(x.upId) && !settledIds.has(x.upId) && x.importPayee === it.desc && Math.abs(E.diffDays(x.date, date)) <= 5 && x.amount * it.amt > 0 && Math.abs(x.amount - it.amt) <= Math.abs(x.amount) * 0.3);
+      t = work.find(x => (x.upStatus === 'HELD' || x.upStatus === 'GONE') && x.accountId === accountId && !x.deletedAt && !held.has(x.upId) && !settledIds.has(x.upId) && x.importPayee === it.desc && Math.abs(E.diffDays(x.date, date)) <= 5 && x.amount * it.amt > 0 && Math.abs(x.amount - it.amt) <= Math.abs(x.amount) * 0.3);
       if (t) { byUp.delete(t.upId); update(t, { upId: it.upId, upStatus: it.status, cleared: t.cleared === 'r' ? 'r' : cleared, ...(t.splits ? {} : { amount: it.amt }) }); byUp.set(it.upId, t); continue; }
     }
     // Something entered by hand or scheduled: the bank record merges into it, keeping its payee, category and memo.
@@ -66,7 +70,8 @@ export function planSync({ items, txns, links, heldIds = null, ctx }) {
     creates.push(n); work.push(n); byUp.set(it.upId, n);
   }
   // Holds the bank has dropped without settling go back to the approval queue to be checked.
-  for (const t of work) if (t.upStatus === 'HELD' && !t.deletedAt && !held.has(t.upId) && !settledIds.has(t.upId) && heldIds && E.diffDays(t.date, E.localDateTime(ctx.now).date) >= 1) update(t, { upStatus: 'GONE', approved: false });
+  // Released holds are marked only when Up confirms it (status RELEASED above): a hold missing from one
+  // sync's list of held ids used to be marked gone and unapproved, then came back on the next sync.
   // Changes to transactions created in this same pass go straight into them.
   const made = new Map(creates.map(c => [c.id, c]));
   return { creates, updates: updates.filter(u => { const c = made.get(u.id); if (c) { Object.assign(c, u.fields); return false; } return true; }) };
